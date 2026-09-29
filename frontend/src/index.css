@@ -1,0 +1,64 @@
+
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f0fdf4;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+  --color-brand-700: #15803d;
+  --color-brand-800: #166534;
+  --color-brand-900: #14532d;
+  
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+
+  --animate-waving-hand: wave 2s linear infinite;
+
+  @keyframes wave {
+    0% { transform: rotate(0.0deg) }
+    10% { transform: rotate(14.0deg) }
+    20% { transform: rotate(-8.0deg) }
+    30% { transform: rotate(14.0deg) }
+    40% { transform: rotate(-4.0deg) }
+    50% { transform: rotate(10.0deg) }
+    60% { transform: rotate(0.0deg) }
+    100% { transform: rotate(0.0deg) }
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-slate-100 text-slate-800 font-sans antialiased selection:bg-brand-500 selection:text-white;
+  }
+  
+  /* Global modern slim scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-300;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand-800 text-white px-5 py-2.5 rounded-[12px] font-semibold hover:bg-brand-900 transition-colors focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 active:scale-[0.98];
+  }
+  .btn-secondary {
+    @apply bg-white text-slate-700 px-5 py-2.5 rounded-[12px] font-semibold border border-slate-200 hover:bg-slate-50 transition-colors focus:ring-2 focus:ring-slate-200 focus:ring-offset-2 active:scale-[0.98];
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white px-5 py-2.5 rounded-[12px] font-semibold hover:bg-red-700 transition-colors focus:ring-2 focus:ring-red-500 focus:ring-offset-2 active:scale-[0.98];
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-[0_4px_24px_rgb(0,0,0,0.03)] border-0 overflow-hidden;
+  }
+}
