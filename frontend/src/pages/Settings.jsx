@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react';
-import { Settings as SettingsIcon, Plus, X, Tag } from 'lucide-react';
+import { Plus, X, Tag } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 import Button from '../components/Button';
 import api from '../utils/api';
@@ -65,10 +65,9 @@ const Settings = () => {
   };
 
   return (
-    <div className="space-y-8 animate-fade-in pb-12 max-w-4xl">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 max-w-4xl">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center">
-          <SettingsIcon className="w-8 h-8 mr-3 text-brand-600" />
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
           Settings
         </h1>
         <p className="text-slate-500 mt-1 text-sm">Manage your application preferences and system settings.</p>
@@ -76,9 +75,6 @@ const Settings = () => {
       <div>
         <div className="bg-white border border-slate-200/60 shadow-sm rounded-2xl p-6 lg:p-8">
           <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-brand-50 text-brand-600 rounded-xl shadow-sm border border-brand-100/50">
-              <Tag size={20} />
-            </div>
             <h2 className="text-xl font-bold text-slate-900">Manage Categories</h2>
           </div>
           

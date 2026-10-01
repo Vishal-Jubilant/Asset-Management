@@ -98,10 +98,26 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
     setFormData(prev => ({ ...prev, [name]: formattedValue }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (onAdd) onAdd(formData);
-    onClose();
+    
+    const filePromises = attachedFiles.map(file => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, type: file.type, data: reader.result });
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+      });
+    });
+    
+    try {
+      const base64Files = await Promise.all(filePromises);
+      if (onAdd) onAdd({ ...formData, attachments: base64Files });
+      onClose();
+    } catch (err) {
+      console.error("Error converting files", err);
+      alert("Error attaching files.");
+    }
   };
 
   const roleLabel = currentUser?.reportingRole
@@ -131,7 +147,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
               <Package size={20} />
             </div>
             <div>
-              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">Create Asset Request</h2>
+              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">Create Request</h2>
               <p className="text-[13px] text-slate-500 mt-0.5">Submit a new request for IT hardware or software.</p>
             </div>
           </div>
@@ -153,11 +169,11 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
                 <label className="text-[13px] font-medium text-slate-700">
                   Requester
                 </label>
-                <div className="flex items-center gap-3 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl shadow-sm">
-                  <div className="w-6 h-6 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0 ring-1 ring-blue-100 shadow-sm">
+                <div className="flex items-center gap-3 px-3.5 h-[46px] bg-white border border-slate-200 rounded-xl shadow-sm">
+                  <div className="w-6 h-6 rounded-full bg-brand-50 text-brand-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0 ring-1 ring-brand-100 shadow-sm">
                     {currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
-                  <span className="text-[13px] font-medium text-slate-700 truncate">{currentUser?.name || 'User'}</span>
+                  <span className="text-[13px] font-medium text-slate-700 truncate capitalize">{currentUser?.name || 'User'}</span>
                 </div>
               </div>
 
@@ -201,7 +217,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
                 value={formData.description}
                 onChange={handleChange}
                 required
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 text-[13px] shadow-sm transition-all placeholder:text-slate-400"
+                className="w-full px-3.5 h-[46px] bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 text-[13px] shadow-sm transition-all placeholder:text-slate-400"
               />
             </div>
 
@@ -268,7 +284,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
           {/* Approval Flow */}
           <div className="px-6 py-4 border-b border-slate-200/75 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[11px] font-bold shadow-sm ring-1 ring-blue-200 flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[11px] font-bold shadow-sm ring-1 ring-brand-200 flex-shrink-0">
                 {avatarLetter}
               </div>
               <div>

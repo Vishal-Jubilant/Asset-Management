@@ -6,17 +6,25 @@ import {
   Clock, CheckCircle, RotateCcw, XCircle, FileText, 
   Bell, Settings, ChevronLeft, ChevronRight, Users 
 } from 'lucide-react';
+import logoImage from '../assets/logo.png';
 
 const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen }) => {
   const navigate = useNavigate();
-  const { currentUser, setCurrentUser } = useContext(AppContext);
+  const { currentUser, setCurrentUser, roles } = useContext(AppContext);
   const user = currentUser;
+
+  const maxRoleLevel = roles && roles.length > 0 ? Math.max(...roles.map(r => r.level || 1)) : 0;
+  const currentUserRoleObj = roles?.find(r => r.name === user?.role);
+  const isLastLevel = currentUserRoleObj && currentUserRoleObj.level === maxRoleLevel;
 
   const mainLinks = [
     { name: 'Dashboard', path: '/app', icon: <LayoutDashboard size={20} /> },
     { name: 'New Request', path: '/app/new-request', icon: <FilePlus size={20} /> },
-    { name: 'My Requests', path: '/app/my-requests', icon: <List size={20} /> }
   ];
+
+  if (!isLastLevel) {
+    mainLinks.push({ name: 'My Requests', path: '/app/my-requests', icon: <List size={20} /> });
+  }
 
   if (user?.role?.toLowerCase() === 'admin') {
     mainLinks.push({ name: 'Users', path: '/app/admin', icon: <Users size={20} /> });
@@ -25,7 +33,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
   
   const sidebarClasses = `
     bg-white text-slate-500 flex flex-col h-screen fixed top-0 left-0 z-30 transition-all duration-300
-    ${isCollapsed ? 'w-20' : 'w-64'}
+    ${isCollapsed ? 'w-20' : 'w-80'}
     ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
   `;
 
@@ -34,10 +42,10 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
       {/* Header */}
       <div className="h-20 flex items-center justify-between px-6 pt-4">
         <div className="flex items-center overflow-hidden">
-          <Package className="text-brand-800 flex-shrink-0" size={32} />
+          <img src={logoImage} alt="Ardent Capital Logo" className="w-9 h-9 flex-shrink-0 object-contain mt-1" />
           {!isCollapsed && (
-            <div className="ml-3 flex flex-col whitespace-nowrap">
-              <span className="text-slate-900 font-extrabold text-xl leading-tight tracking-wide">Donezo</span>
+            <div className="ml-1.5 flex flex-col whitespace-nowrap">
+              <span className="text-slate-900 font-extrabold text-[26px] leading-tight tracking-wide">Ardent Capital</span>
             </div>
           )}
         </div>
@@ -108,7 +116,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
           </div>
           {!isCollapsed && (
             <div className="flex flex-col overflow-hidden ml-3">
-              <span className="text-sm font-bold text-slate-800 leading-tight truncate">{user?.name || 'User'}</span>
+              <span className="text-sm font-bold text-slate-800 leading-tight truncate capitalize">{user?.name || 'User'}</span>
               <span className="text-[10px] text-slate-500 leading-tight font-semibold mt-0.5 truncate uppercase tracking-wider">{user?.role || 'Role'}</span>
             </div>
           )}

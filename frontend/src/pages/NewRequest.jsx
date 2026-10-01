@@ -1,7 +1,7 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
-import { Search, Filter, Check, ChevronDown, Plus, Trash2, Bell, X, Package, CheckCircle } from 'lucide-react';
+import { Search, Filter, Check, ChevronDown, Plus, Trash2, Bell, X, Package, CheckCircle, Download } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import RequestTable from '../components/RequestTable';
 import Button from '../components/Button';
@@ -85,7 +85,7 @@ const NewRequest = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filterOptions = ['Approved', 'Pending', 'Returned', 'Rejected'];
+
   const toggleFilter = (option) => {
     setStatusFilters(prev => 
       prev.includes(option) ? prev.filter(f => f !== option) : [...prev, option]
@@ -132,7 +132,8 @@ const NewRequest = () => {
         description: data.description,
         justification: data.justification,
         selectedReportingTo: data.selectedReportingTo || (Array.isArray(user?.reportingTo) ? user.reportingTo : user?.reportingTo ? [user.reportingTo] : []),
-        requestedBy: user?.id || 1
+        requestedBy: user?.id || 1,
+        attachments: data.attachments || []
       };
       
       const response = await api.post('/asset-requests', payload);
@@ -143,6 +144,11 @@ const NewRequest = () => {
     }
   };
   const myOwnRequests = requests.filter(r => r.requestedBy === currentUser?.id);
+
+  const filterOptions = ['Approved', 'Pending', 'Returned', 'Rejected'];
+  if (myOwnRequests.some(r => r.status === 'Hold')) {
+    filterOptions.push('Hold');
+  }
 
   const stats = [
     { title: 'Total Request', value: myOwnRequests.length },
@@ -171,6 +177,55 @@ const NewRequest = () => {
     
     return matchesSearch && matchesFilter;
   });
+
+  const handleDownloadData = () => {
+    if (filteredRequests.length === 0) return;
+    
+    // Format headers
+    const headers = ['Request ID', 'Date', 'Category', 'Subject', 'Description', 'Status'];
+    
+    // Escape string for CSV
+    const escapeCSV = (str) => {
+      if (!str) return '""';
+      const escaped = String(str).replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    const rows = filteredRequests.map(r => {
+      const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
+      
+      let displayStatus = r.status;
+      if (r.requestedBy !== currentUser?.id) {
+        const vote = r.votes && r.votes[currentUser?.id];
+        if (vote === 'approve') displayStatus = 'Approved';
+        else if (vote === 'reject') displayStatus = 'Rejected';
+        else if (vote === 'return') displayStatus = 'Returned';
+        else displayStatus = 'Pending';
+      }
+
+      return [
+        escapeCSV(r.id),
+        escapeCSV(date),
+        escapeCSV(r.category),
+        escapeCSV(r.item),
+        escapeCSV(r.justification || ''),
+        escapeCSV(displayStatus)
+      ].join(',');
+    });
+    
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Requests_Data_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -216,7 +271,7 @@ const NewRequest = () => {
                           <div className="flex-1">
                             <p className="text-xs font-bold text-slate-800">{req.id}</p>
                             <p className="text-sm text-slate-600 mt-1 leading-snug">
-                              New Asset Request from <span className="font-semibold text-brand-600">{getRequesterName(req.requestedBy)}</span>
+                              New Request from <span className="font-semibold text-brand-600">{getRequesterName(req.requestedBy)}</span>
                             </p>
                             <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatDateTime(req.createdAt)}</p>
                           </div>
@@ -276,14 +331,23 @@ const NewRequest = () => {
           className="shadow-md shadow-brand-500/20 whitespace-nowrap flex-shrink-0" 
           onClick={() => setIsNewRequestModalOpen(true)}
         >
-          <Plus size={20} className="mr-2" /> New Asset Request
+          <Plus size={20} className="mr-2" /> New Request
         </Button>
       </div>
 
       <div className="space-y-4 pt-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-slate-900 tracking-tight">Recent Requests</h2>
-          <div className="relative" ref={filterRef}>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleDownloadData}
+              disabled={filteredRequests.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 rounded-xl font-medium text-sm transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed h-[38px]"
+            >
+              <Download size={16} />
+              <span className="hidden sm:inline">Download Excel</span>
+            </button>
+            <div className="relative" ref={filterRef}>
             <button 
               onClick={() => setIsFilterOpen(!isFilterOpen)}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all ${
@@ -325,6 +389,7 @@ const NewRequest = () => {
                 ))}
               </div>
             )}
+          </div>
           </div>
         </div>
         <RequestTable requests={filteredRequests} role="requester" onAction={handleAction} />

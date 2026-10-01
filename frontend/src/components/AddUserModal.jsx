@@ -62,10 +62,13 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === 'role') {
+      const selectedRoleObj = roles.find(r => r.name === value);
+      const immediateHigherRole = selectedRoleObj ? roles.find(r => r.level === selectedRoleObj.level - 1) : null;
+      
       setFormData({ 
         ...formData, 
         role: value,
-        reportingRole: '',
+        reportingRole: immediateHigherRole ? immediateHigherRole.name : '',
         reportingTo: []
       });
     } else if (name === 'reportingRole') {
@@ -125,12 +128,30 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
   const sortedRoles = [...roles].sort((a, b) => a.level - b.level);
   const currentRoleObj = sortedRoles.find(r => r.name === formData.role);
   const isTopLevel = currentRoleObj?.level === 1;
-  const higherRoles = currentRoleObj ? sortedRoles.filter(r => r.level < currentRoleObj.level) : [];
+  const higherRoles = currentRoleObj ? sortedRoles.filter(r => r.level === currentRoleObj.level - 1) : [];
 
-  const roleOptions = sortedRoles.map(r => ({
-    value: r.name,
-    label: `L${r.level} – ${r.name.charAt(0).toUpperCase() + r.name.slice(1)}`
-  }));
+  const roleOptions = sortedRoles.map(r => {
+    let isAllowed = true;
+    let tooltip = '';
+    
+    if (r.level > 1 && (!editingUser || editingUser.role !== r.name)) {
+      const higherLevelRole = sortedRoles.find(role => role.level === r.level - 1);
+      if (higherLevelRole) {
+        const hasHigherLevelUser = users.some(u => u.role === higherLevelRole.name);
+        isAllowed = hasHigherLevelUser;
+        if (!isAllowed) {
+          tooltip = `Please create an L${r.level - 1} (${higherLevelRole.name}) user first.`;
+        }
+      }
+    }
+
+    return {
+      value: r.name,
+      label: `L${r.level} – ${r.name.charAt(0).toUpperCase() + r.name.slice(1)}`,
+      isDisabled: !isAllowed,
+      tooltip: tooltip
+    };
+  });
 
   const statusOptions = [
     { value: 'Active', label: 'Active' },
@@ -147,6 +168,8 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     value: u.name,
     label: u.name
   }));
+
+  const isEditingSystemAdmin = editingUser && editingUser.role?.toUpperCase() === 'ADMIN';
 
   if (!isOpen) return null;
 
@@ -227,17 +250,19 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   placeholder="Enter mobile number"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-700">Role <span className="text-red-500">*</span></label>
-                <CustomSelect
-                  name="role"
-                  options={roleOptions}
-                  value={formData.role}
-                  onChange={handleChange}
-                  placeholder="Select a role"
-                  required={true}
-                />
-              </div>
+              {!isEditingSystemAdmin && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-slate-700">Role <span className="text-red-500">*</span></label>
+                  <CustomSelect
+                    name="role"
+                    options={roleOptions}
+                    value={formData.role}
+                    onChange={handleChange}
+                    placeholder="Select a role"
+                    required={true}
+                  />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">Status <span className="text-red-500">*</span></label>
                 <CustomSelect
@@ -249,36 +274,40 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   required={true}
                 />
               </div>
-              <div className="space-y-1.5 md:col-span-1">
-                <label className="text-sm font-medium text-slate-700">
-                  Reporting Role {!isTopLevel && <span className="text-red-500">*</span>}
-                </label>
-                <CustomSelect
-                  name="reportingRole"
-                  options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : reportingOptions}
-                  value={formData.reportingRole}
-                  onChange={handleChange}
-                  placeholder="Select reporting role"
-                  disabled={isTopLevel || higherRoles.length === 0}
-                  required={!isTopLevel}
-                />
-              </div>
-              <div className="space-y-1.5 md:col-span-1">
-                <label className="text-sm font-medium text-slate-700">
-                  Reporting Person {!isTopLevel && personOptions.length > 0 && <span className="text-red-500">*</span>}
-                </label>
-                <CustomSelect
-                  name="reportingTo"
-                  options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : personOptions}
-                  value={formData.reportingTo}
-                  onChange={handleChange}
-                  placeholder={formData.reportingRole && personOptions.length === 0 ? "No persons found" : "Select person"}
-                  disabled={isTopLevel || !formData.reportingRole || personOptions.length === 0}
-                  required={!isTopLevel && personOptions.length > 0}
-                  isMulti={!isTopLevel}
-                  menuPlacement="top"
-                />
-              </div>
+              {!isEditingSystemAdmin && (
+                <>
+                  <div className="space-y-1.5 md:col-span-1">
+                    <label className="text-sm font-medium text-slate-700">
+                      Reporting Role {!isTopLevel && <span className="text-red-500">*</span>}
+                    </label>
+                    <CustomSelect
+                      name="reportingRole"
+                      options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : reportingOptions}
+                      value={formData.reportingRole}
+                      onChange={handleChange}
+                      placeholder="Select reporting role"
+                      disabled={isTopLevel || higherRoles.length <= 1}
+                      required={!isTopLevel}
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-1">
+                    <label className="text-sm font-medium text-slate-700">
+                      Reporting Person {!isTopLevel && personOptions.length > 0 && <span className="text-red-500">*</span>}
+                    </label>
+                    <CustomSelect
+                      name="reportingTo"
+                      options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : personOptions}
+                      value={formData.reportingTo}
+                      onChange={handleChange}
+                      placeholder={formData.reportingRole && personOptions.length === 0 ? "No persons found" : "Select person"}
+                      disabled={isTopLevel || !formData.reportingRole || personOptions.length === 0}
+                      required={!isTopLevel && personOptions.length > 0}
+                      isMulti={!isTopLevel}
+                      menuPlacement="top"
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-sm font-medium text-slate-700">Password <span className="text-red-500">*</span></label>
                 <div className="relative group">
@@ -323,7 +352,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
             <button
                form="add-user-form" 
                type="submit" 
-               className="px-5 py-2 text-[13px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-600/20"
+               className="px-5 py-2 text-[13px] font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             >
                {editingUser ? 'Save Changes' : 'Add User'}
             </button>

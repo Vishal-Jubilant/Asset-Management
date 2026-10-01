@@ -8,7 +8,7 @@ import AddUserModal from '../components/AddUserModal';
 import ManageRolesModal from '../components/ManageRolesModal';
 import MultiSelectDropdown from '../components/MultiSelectDropdown';
 import { AppContext } from '../context/AppContext';
-import { INITIAL_REQUESTS } from '../data/requests';
+
 import api from '../utils/api';
 
 const Admin = () => {
@@ -62,10 +62,10 @@ const Admin = () => {
 
 
   return (
-    <div className="space-y-8 animate-fade-in pb-12">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center">
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
           Admin Dashboard
         </h1>
         <p className="text-slate-500 mt-1 text-sm">Manage users, roles, and system settings.</p>

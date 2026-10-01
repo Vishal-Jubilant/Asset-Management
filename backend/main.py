@@ -73,6 +73,7 @@ class AssetRequestCreate(BaseModel):
     justification: str
     selectedReportingTo: Optional[Any] = None
     requestedBy: int
+    attachments: Optional[list] = []
 
 class ActionRequest(BaseModel):
     action: str
@@ -361,16 +362,26 @@ async def get_asset_requests(db: Session = Depends(get_db)):
 
 @app.post("/api/asset-requests", status_code=201)
 async def create_asset_request(request: AssetRequestCreate, db: Session = Depends(get_db)):
-    last_req = db.query(models.AssetRequest).order_by(desc(models.AssetRequest.createdAt)).first()
-    if last_req:
+    # Generate a strictly unique sequential ID like REQ-0001
+    last_request = db.query(models.AssetRequest).filter(models.AssetRequest.id.like("REQ-%")).order_by(desc(models.AssetRequest.id)).first()
+    
+    next_num = 1
+    if last_request:
         try:
-            last_num = int(last_req.id.split('-')[-1])
-            new_id = f"AR-{datetime.now().year}-{last_num + 1}"
+            # Extract number from REQ-XXXX
+            num_part = last_request.id.split("-")[1]
+            next_num = int(num_part) + 1
         except:
-            total_reqs = db.query(models.AssetRequest).count()
-            new_id = f"AR-{datetime.now().year}-{total_reqs + 100}"
-    else:
-        new_id = f"AR-{datetime.now().year}-100"
+            count = db.query(models.AssetRequest).count()
+            next_num = count + 1
+            
+    # Strict duplicate check loop to prevent race condition overlaps
+    while True:
+        new_id = f"REQ-{next_num:04d}"
+        exists = db.query(models.AssetRequest).filter(models.AssetRequest.id == new_id).first()
+        if not exists:
+            break
+        next_num += 1
     
     item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
     
@@ -403,6 +414,7 @@ async def create_asset_request(request: AssetRequestCreate, db: Session = Depend
         votes={},
         approverSelections={},
         commentsHistory=[],
+        attachments=request.attachments,
         createdAt=datetime.now().isoformat(),
         updatedAt=datetime.now().isoformat()
     )

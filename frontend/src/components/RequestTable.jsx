@@ -169,9 +169,7 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                 <th className="px-6 py-4 font-medium">Category</th>
                 <th className="px-6 py-4 font-medium">Subject</th>
                 <th className="px-6 py-4 font-medium">Description</th>
-                {currentUser?.role !== 'incharge' && currentUser?.role !== 'user' && (
-                  <th className="px-6 py-4 font-medium">Status</th>
-                )}
+                <th className="px-6 py-4 font-medium">Status</th>
               </tr>
             ) : (
               <tr>
@@ -209,22 +207,20 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                     <td className="px-6 py-4 text-slate-600">{req.category}</td>
                     <td className="px-6 py-4 text-slate-700 font-medium max-w-[150px] truncate">{req.item}</td>
                     <td className="px-6 py-4 text-slate-600 max-w-[200px] truncate">{req.justification || 'No description provided'}</td>
-                    {currentUser?.role !== 'incharge' && currentUser?.role !== 'user' && (
-                      <td className="px-6 py-4">
-                        {(() => {
-                           if (req.requestedBy === currentUser?.id) {
-                             return <StatusBadge status={req.status} />;
-                           }
-                           
-                           const vote = req.votes && req.votes[currentUser?.id];
-                           if (vote === 'approve') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><CheckCircle size={14} /> Approved</span>;
-                           if (vote === 'reject') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><XCircle size={14} /> Rejected</span>;
-                           if (vote === 'return') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><RotateCcw size={14} /> Returned</span>;
-                           
-                           return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600"><Clock size={14} /> Pending</span>;
-                        })()}
-                      </td>
-                    )}
+                    <td className="px-6 py-4">
+                      {(() => {
+                         if (req.requestedBy === currentUser?.id) {
+                           return <StatusBadge status={req.status} />;
+                         }
+                         
+                         const vote = req.votes && req.votes[currentUser?.id];
+                         if (vote === 'approve') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><CheckCircle size={14} /> Approved</span>;
+                         if (vote === 'reject') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><XCircle size={14} /> Rejected</span>;
+                         if (vote === 'return') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><RotateCcw size={14} /> Returned</span>;
+                         
+                         return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600"><Clock size={14} /> Pending</span>;
+                      })()}
+                    </td>
                   </>
                 ) : (
                   <>

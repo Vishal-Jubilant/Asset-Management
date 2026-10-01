@@ -88,9 +88,9 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative w-full cursor-pointer text-left transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 flex items-center justify-between min-h-[38px] ${
+        className={`relative w-full cursor-pointer text-left transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 flex items-center justify-between h-[46px] ${
           disabled ? 'cursor-not-allowed bg-slate-50 border-slate-200 text-slate-500' : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
-        } border rounded-lg pl-3.5 pr-10 py-1.5 text-sm ${isOpen ? 'ring-2 ring-brand-500/20 border-brand-500 bg-white' : ''}`}
+        } border rounded-xl pl-3.5 pr-10 text-[13px] shadow-sm ${isOpen ? 'ring-2 ring-brand-500/20 border-brand-500 bg-white' : ''}`}
       >
         <span className="block truncate flex-1">
           {renderDisplay()}
@@ -111,11 +111,14 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
               return (
                 <li
                   key={option.value}
-                  onClick={() => handleSelect(option.value)}
-                  className={`relative cursor-default select-none py-2 pl-3 pr-9 transition-all text-sm mx-1 my-0.5 rounded-md ${
-                    isSelected 
-                      ? 'bg-brand-50/80 text-brand-700 font-medium' 
-                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                  onClick={() => !option.isDisabled && handleSelect(option.value)}
+                  title={option.tooltip || ''}
+                  className={`relative select-none py-2 pl-3 pr-9 transition-all text-sm mx-1 my-0.5 rounded-md ${
+                    option.isDisabled
+                      ? 'opacity-50 cursor-not-allowed bg-slate-50 text-slate-400'
+                      : isSelected 
+                        ? 'bg-brand-50/80 text-brand-700 font-medium cursor-default' 
+                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 cursor-pointer'
                   }`}
                 >
                   <span className="block truncate">

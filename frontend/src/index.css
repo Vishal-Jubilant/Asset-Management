@@ -1,35 +1,14 @@
-
 @import "tailwindcss";
+@import "@heroui/styles";
+@config "../tailwind.config.js";
 
-@theme {
-  --color-brand-50: #f0fdf4;
-  --color-brand-100: #dcfce7;
-  --color-brand-200: #bbf7d0;
-  --color-brand-500: #22c55e;
-  --color-brand-600: #16a34a;
-  --color-brand-700: #15803d;
-  --color-brand-800: #166534;
-  --color-brand-900: #14532d;
-  
-  --font-sans: 'Plus Jakarta Sans', sans-serif;
-
-  --animate-waving-hand: wave 2s linear infinite;
-
-  @keyframes wave {
-    0% { transform: rotate(0.0deg) }
-    10% { transform: rotate(14.0deg) }
-    20% { transform: rotate(-8.0deg) }
-    30% { transform: rotate(14.0deg) }
-    40% { transform: rotate(-4.0deg) }
-    50% { transform: rotate(10.0deg) }
-    60% { transform: rotate(0.0deg) }
-    100% { transform: rotate(0.0deg) }
-  }
-}
 
 @layer base {
   body {
-    @apply bg-slate-100 text-slate-800 font-sans antialiased selection:bg-brand-500 selection:text-white;
+    @apply bg-slate-100 text-slate-800 font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-brand-500 text-white;
   }
   
   /* Global modern slim scrollbar */
@@ -61,4 +40,15 @@
   .card {
     @apply bg-white rounded-2xl shadow-[0_4px_24px_rgb(0,0,0,0.03)] border-0 overflow-hidden;
   }
+}
+
+/* ── HeroUI RangeCalendar: override accent → green ── */
+.green-calendar {
+  /* HeroUI uses --accent for selected/active states */
+  --accent: oklch(0.7329 0.1935 150.81);             /* #22c55e green */
+  --accent-foreground: oklch(0.98 0.018 155.8);       /* white-ish */
+  --accent-hover: oklch(0.65 0.19 150.81);            /* darker green on hover */
+  --accent-soft: oklch(0.93 0.08 150.81);             /* light green for range */
+  --accent-soft-foreground: oklch(0.42 0.15 150.81);  /* dark green text on range */
+  --accent-soft-hover: oklch(0.88 0.10 150.81);       /* slightly darker light green */
 }

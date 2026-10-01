@@ -44,5 +44,6 @@ class AssetRequest(Base):
     votes = Column(JSON, default=dict)
     approverSelections = Column(JSON, default=dict)
     commentsHistory = Column(JSON, default=list)
+    attachments = Column(JSON, default=list)
     createdAt = Column(String)
     updatedAt = Column(String)

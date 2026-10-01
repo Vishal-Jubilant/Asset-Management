@@ -5,8 +5,11 @@ import StatCard from '../components/StatCard';
 import RequestDetailsModal from '../components/RequestDetailsModal';
 import api from '../utils/api';
 import { Package, CheckCircle, Clock, RotateCcw, XCircle, ShieldAlert, Search, ChevronDown, Check, Download, CalendarDays } from 'lucide-react';
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
+import { RangeCalendar } from "@heroui/react";
+import {
+  parseDate,
+  getLocalTimeZone,
+} from "@internationalized/date";
 
 const MyRequests = () => {
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
@@ -18,11 +21,16 @@ const MyRequests = () => {
   const filterRef = useRef(null);
 
   const [dateFilter, setDateFilter] = useState({ startDate: null, endDate: null });
+  const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
+  const dateFilterRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (filterRef.current && !filterRef.current.contains(event.target)) {
         setIsFilterOpen(false);
+      }
+      if (dateFilterRef.current && !dateFilterRef.current.contains(event.target)) {
+        setIsDateFilterOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -114,7 +122,7 @@ const MyRequests = () => {
   const filteredRequests = myRequests.filter(r => {
     const displayStatus = (() => {
       let status = r.status;
-      if (currentUser?.role !== 'incharge' && currentUser?.role !== 'user' && r.requestedBy !== currentUser?.id) {
+      if (r.requestedBy !== currentUser?.id) {
         const vote = r.votes && r.votes[currentUser?.id];
         if (vote === 'approve') status = 'Approved';
         else if (vote === 'reject') status = 'Rejected';
@@ -180,7 +188,7 @@ const MyRequests = () => {
       const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
       
       let displayStatus = r.status;
-      if (currentUser?.role !== 'incharge' && currentUser?.role !== 'user' && r.requestedBy !== currentUser?.id) {
+      if (r.requestedBy !== currentUser?.id) {
         const vote = r.votes && r.votes[currentUser?.id];
         if (vote === 'approve') displayStatus = 'Approved';
         else if (vote === 'reject') displayStatus = 'Rejected';
@@ -238,28 +246,100 @@ const MyRequests = () => {
           />
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative flex items-center bg-white border border-slate-200 text-slate-700 rounded-xl shadow-sm px-4 py-2 hover:bg-slate-50 transition-colors focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:border-brand-500 gap-2">
-            <CalendarDays size={15} className="text-slate-400 flex-shrink-0" />
-            <DatePicker
-              selectsRange
-              startDate={dateFilter.startDate}
-              endDate={dateFilter.endDate}
-              onChange={([start, end]) => setDateFilter({ startDate: start, endDate: end })}
-              dateFormat="MMM d, yyyy"
-              placeholderText="Select date range"
-              isClearable={false}
-              wrapperClassName="flex items-center"
-              className="bg-transparent border-none focus:outline-none text-[13px] text-slate-700 font-medium cursor-pointer w-[190px] p-0 m-0 leading-none placeholder:text-slate-400 focus:ring-0"
-            />
-            {(dateFilter.startDate || dateFilter.endDate) && (
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <button
+            onClick={handleDownloadData}
+            disabled={filteredRequests.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 rounded-xl font-medium text-sm transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed h-[42px]"
+          >
+            <Download size={16} />
+            <span className="hidden sm:inline">Download Excel</span>
+          </button>
+
+          <div className="relative" ref={dateFilterRef}>
+            <div className="relative flex items-center bg-white border border-slate-200 text-slate-700 rounded-xl shadow-sm px-4 py-2 hover:bg-slate-50 transition-colors focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:border-brand-500 gap-2">
+              <CalendarDays size={15} className="text-slate-400 flex-shrink-0" />
               <button
-                onClick={() => setDateFilter({ startDate: null, endDate: null })}
-                className="text-slate-400 hover:text-slate-600 focus:outline-none bg-slate-100 hover:bg-slate-200 rounded-full p-0.5"
-                title="Clear date filter"
+                onClick={() => setIsDateFilterOpen(!isDateFilterOpen)}
+                className="bg-transparent border-none focus:outline-none text-[13px] text-slate-700 font-medium cursor-pointer p-0 m-0 text-left whitespace-nowrap"
               >
-                <XCircle size={14} />
+                {dateFilter.startDate && dateFilter.endDate 
+                  ? `${dateFilter.startDate.toLocaleDateString()} - ${dateFilter.endDate.toLocaleDateString()}` 
+                  : <span className="text-slate-400">Select date range</span>}
               </button>
+              {(dateFilter.startDate || dateFilter.endDate) && (
+                <button
+                  onClick={() => setDateFilter({ startDate: null, endDate: null })}
+                  className="text-slate-400 hover:text-slate-600 focus:outline-none bg-slate-100 hover:bg-slate-200 rounded-full p-0.5 ml-auto"
+                  title="Clear date filter"
+                >
+                  <XCircle size={14} />
+                </button>
+              )}
+            </div>
+
+            {isDateFilterOpen && (
+              <div className="absolute right-0 mt-2 bg-white border border-slate-200/60 rounded-2xl shadow-xl z-10 animate-in fade-in slide-in-from-top-2 p-2 scale-90 origin-top-right text-sm green-calendar">
+                <RangeCalendar
+                  aria-label="Trip dates"
+                  firstDayOfWeek="mon"
+                  value={
+                    dateFilter.startDate && dateFilter.endDate
+                      ? {
+                          start: parseDate(
+                            `${dateFilter.startDate.getFullYear()}-${String(
+                              dateFilter.startDate.getMonth() + 1
+                            ).padStart(2, "0")}-${String(
+                              dateFilter.startDate.getDate()
+                            ).padStart(2, "0")}`
+                          ),
+                          end: parseDate(
+                            `${dateFilter.endDate.getFullYear()}-${String(
+                              dateFilter.endDate.getMonth() + 1
+                            ).padStart(2, "0")}-${String(
+                              dateFilter.endDate.getDate()
+                            ).padStart(2, "0")}`
+                          ),
+                        }
+                      : null
+                  }
+                  onChange={(range) => {
+                    setDateFilter({
+                      startDate: range?.start
+                        ? range.start.toDate(getLocalTimeZone())
+                        : null,
+                      endDate: range?.end
+                        ? range.end.toDate(getLocalTimeZone())
+                        : null,
+                    });
+                    if (range?.start && range?.end) {
+                      setIsDateFilterOpen(false);
+                    }
+                  }}
+                >
+                  <RangeCalendar.Header>
+                    <RangeCalendar.Heading />
+                    <RangeCalendar.NavButton slot="previous" />
+                    <RangeCalendar.NavButton slot="next" />
+                  </RangeCalendar.Header>
+
+                  <RangeCalendar.Grid>
+                    <RangeCalendar.GridHeader>
+                      {(day) => (
+                        <RangeCalendar.HeaderCell>
+                          {day}
+                        </RangeCalendar.HeaderCell>
+                      )}
+                    </RangeCalendar.GridHeader>
+
+                    <RangeCalendar.GridBody>
+                      {(date) => (
+                        <RangeCalendar.Cell date={date} />
+                      )}
+                    </RangeCalendar.GridBody>
+                  </RangeCalendar.Grid>
+                </RangeCalendar>
+              </div>
             )}
           </div>
 
@@ -317,16 +397,6 @@ const MyRequests = () => {
         onAction={handleAction} 
       />
 
-      <div className="flex justify-end mt-6">
-        <button
-          onClick={handleDownloadData}
-          disabled={filteredRequests.length === 0}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 rounded-xl font-semibold text-sm transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Download size={18} />
-          Download Excel
-        </button>
-      </div>
 
       <RequestDetailsModal 
         isOpen={isModalOpen}

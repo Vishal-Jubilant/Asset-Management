@@ -42,7 +42,7 @@ const MainLayout = ({ role }) => {
         setIsMobileOpen={setIsMobileOpen}
       />
       
-      <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
+      <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'lg:ml-20' : 'lg:ml-80'}`}>
         {isAdminRoute ? (
           <div className="lg:hidden flex items-center sticky top-0 z-10 bg-slate-100 h-16 px-4">
             <button 

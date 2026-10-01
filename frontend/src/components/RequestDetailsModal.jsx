@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
-  User, Hash, Monitor, ChevronDown, ChevronRight, MessageSquare, AlertCircle
+  User, Hash, Monitor, ChevronDown, ChevronRight, MessageSquare, AlertCircle, Paperclip, Download
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
@@ -391,6 +391,56 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               {request.justification || <span className="text-slate-400 italic">No description provided.</span>}
             </div>
           </div>
+
+          {/* Attachments */}
+          {request.attachments && request.attachments.length > 0 && (
+            <div>
+              <h3 className="text-[15px] font-semibold text-slate-900 mb-2.5">Attachments</h3>
+              <div className="flex flex-wrap gap-3">
+                {request.attachments.map((file, idx) => (
+                  <div key={idx} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2 shadow-sm pr-4 max-w-sm w-full sm:w-auto">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                      <Paperclip size={18} />
+                    </div>
+                    <div className="flex-1 min-w-[120px] overflow-hidden">
+                      <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
+                      <p className="text-[11px] text-slate-500 uppercase tracking-wide">Image</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0 border-l border-slate-100 pl-2">
+                      <button 
+                        onClick={() => {
+                          const newWindow = window.open();
+                          if (newWindow) {
+                            newWindow.document.write(`
+                              <html>
+                                <head><title>Attachment: ${file.name}</title></head>
+                                <body style="margin:0; background-color:#1e293b; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden;">
+                                  <img src="${file.data}" style="max-width:90vw; max-height:90vh; object-fit:contain; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border-radius: 8px;" />
+                                </body>
+                              </html>
+                            `);
+                            newWindow.document.close();
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="View"
+                      >
+                        <Monitor size={16} />
+                      </button>
+                      <a 
+                        href={file.data} 
+                        download={file.name}
+                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Download"
+                      >
+                        <Download size={16} />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Reviewer Input */}
           {showActions && (

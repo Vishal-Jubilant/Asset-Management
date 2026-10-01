@@ -39,7 +39,7 @@ const UserTable = ({ users, onEdit, onDelete }) => {
                     <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
                       {user.name.charAt(0)}
                     </div>
-                    <span className="truncate">{user.name}</span>
+                    <span className="truncate capitalize">{user.name}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-slate-600">
