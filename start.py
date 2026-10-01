@@ -8,7 +8,7 @@ import re
 
 def is_port_in_use(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
+        return s.connect_ex(('192.168.0.7', port)) == 0
 
 def get_db_url():
     try:
@@ -117,8 +117,8 @@ def main():
                         
     print("[✓] All required tables and columns validated\n")
     
-    backend_running = is_port_in_use(8000)
-    frontend_running = is_port_in_use(5173)
+    backend_running = is_port_in_use(4000)
+    frontend_running = is_port_in_use(4001)
 
     print("=" * 40)
     print("APPLICATION STARTING...")
@@ -127,16 +127,16 @@ def main():
     print("Database: Connected")
     print("Schema:   Validated")
     print(f"Frontend: {'Already Running' if frontend_running else 'Starting...'}")
-    print("\nFrontend URL: http://localhost:5173")
-    print("Backend URL:  http://localhost:8000")
+    print("\nFrontend URL: http://192.168.0.7:4001")
+    print("Backend URL:  http://192.168.0.7:4000")
     print("=" * 40)
     print("Press Ctrl+C to stop all servers.")
     print("=" * 40 + "\n")
 
     if not backend_running:
-        backend_process = subprocess.Popen('cd backend && .\\venv\\Scripts\\activate && uvicorn main:app --reload', shell=True, stdin=subprocess.DEVNULL)
+        backend_process = subprocess.Popen('cd backend && .\\venv\\Scripts\\activate && uvicorn main:app --reload --host 192.168.0.7 --port 4000', shell=True, stdin=subprocess.DEVNULL)
     if not frontend_running:
-        frontend_process = subprocess.Popen('cd frontend && npm run dev', shell=True, stdin=subprocess.DEVNULL)
+        frontend_process = subprocess.Popen('cd frontend && npm run dev -- --host 192.168.0.7 --port 4001', shell=True, stdin=subprocess.DEVNULL)
 
     try:
         while True:
