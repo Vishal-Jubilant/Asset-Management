@@ -117,6 +117,38 @@ def main():
                         
     print("[✓] All required tables and columns validated\n")
     
+    print("STEP 5: Creating Default Admin User...")
+    from sqlalchemy.orm import sessionmaker  # type: ignore
+    import hashlib
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    
+    try:
+        admin_user = db.query(models.User).filter(models.User.empCode == 'Admin').first()
+        if not admin_user:
+            # Encrypt password using SHA-256
+            hashed_password = hashlib.sha256("Admin@123".encode()).hexdigest()
+            new_admin = models.User(
+                name="Administrator",
+                mailid="admin@system.local",
+                empCode="Admin",
+                password=hashed_password,
+                role="Admin",
+                status="Active",
+                firstLogin=False
+            )
+            db.add(new_admin)
+            db.commit()
+            print("[+] Admin user 'Administrator' created successfully.")
+        else:
+            print("[✓] Admin user already exists.")
+    except Exception as e:
+        print(f"[-] Error creating admin user: {e}")
+    finally:
+        db.close()
+        
+    print()
     backend_running = is_port_in_use(4000)
     frontend_running = is_port_in_use(4001)
 
