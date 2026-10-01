@@ -1,11 +1,13 @@
+import os
+import uuid
+import jwt
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Any, Dict
-from datetime import datetime
+from typing import List, Optional, Any, Dict, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-import uuid
 
 import models
 from database import engine, get_db
@@ -90,6 +92,59 @@ def format_user(user):
         u_dict["reportingTo"] = []
     return u_dict
 
+# JWT Configuration
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-jwt-key-asset-management-2026")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+def create_access_token(user_id: int, role: Optional[str] = None) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "role": role,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=JWT_EXPIRATION_HOURS)).timestamp())
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired. Please log in again.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
+
+def get_caller(authorization: str, db: Session):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token format")
+    
+    token = authorization.split("Bearer ", 1)[1].strip()
+    
+    # Graceful support for legacy/dev fake tokens during transition
+    user_id = None
+    if token.startswith("fake-jwt-token-"):
+        try:
+            user_id = int(token.replace("fake-jwt-token-", ""))
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    else:
+        payload = decode_access_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        try:
+            user_id = int(sub)
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Invalid user ID in token")
+            
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.status == 'Inactive':
+        raise HTTPException(status_code=403, detail="This account is inactive")
+    return user
+
 @app.post("/api/auth/login")
 async def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -102,22 +157,12 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="This account is inactive")
     
     user_dict = format_user(user)
-    return {"token": f"fake-jwt-token-{user.id}", "user": user_dict}
+    token = create_access_token(user_id=user.id, role=user.role)
+    return {"token": token, "user": user_dict}
 
 @app.get("/api/auth/me")
 async def get_me(authorization: str = Header(None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer fake-jwt-token-"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    try:
-        user_id = int(authorization.replace("Bearer fake-jwt-token-", ""))
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-        
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
+    user = get_caller(authorization, db)
     return format_user(user)
 
 @app.post("/api/auth/setup/{user_id}")
@@ -182,17 +227,6 @@ async def get_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     return [format_user(u) for u in users]
 
-def get_caller(authorization, db):
-    if not authorization or not authorization.startswith("Bearer fake-jwt-token-"):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    try:
-        user_id = int(authorization.replace("Bearer fake-jwt-token-", ""))
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 @app.post("/api/users")
 async def create_user(req: UserCreate, authorization: str = Header(None), db: Session = Depends(get_db)):
