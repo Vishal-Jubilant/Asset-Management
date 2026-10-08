@@ -176,7 +176,8 @@ const Dashboard = () => {
   };
 
   const pendingRequestsForMe = requests.filter(r => {
-    if (user?.role === 'admin') return r.status?.includes('Pending');
+    // Admin only gets notified of their own returned requests, not all pending
+  if (user?.role === 'admin') return r.requestedBy === user?.id && r.status === 'Returned';
     
     if (r.requestedBy === user?.id) {
        return r.status === 'Returned';
@@ -307,7 +308,8 @@ const Dashboard = () => {
     // Optionally exclude my own requests from "received"
     if (r.requestedBy === user?.id) return false;
     
-    if (user?.role?.toLowerCase() === 'admin') return true;
+    // Admin only sees their own created requests, not others'
+    if (user?.role?.toLowerCase() === 'admin') return false;
     
     const requester = users.find(u => u.id === r.requestedBy);
     if (!requester) return false;
