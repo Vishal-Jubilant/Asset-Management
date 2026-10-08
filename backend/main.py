@@ -398,68 +398,85 @@ async def get_asset_requests(db: Session = Depends(get_db)):
 
 @app.post("/api/asset-requests", status_code=201)
 async def create_asset_request(request: AssetRequestCreate, db: Session = Depends(get_db)):
-    # Generate a strictly unique sequential ID like REQ-0001
-    last_request = db.query(models.AssetRequest).filter(models.AssetRequest.id.like("REQ-%")).order_by(desc(models.AssetRequest.id)).first()
+    from sqlalchemy.sql.expression import func
+    import time
     
-    next_num = 1
-    if last_request:
+    max_retries = 20
+    for attempt in range(max_retries):
         try:
-            # Extract number from REQ-XXXX
-            num_part = last_request.id.split("-")[1]
-            next_num = int(num_part) + 1
-        except:
-            count = db.query(models.AssetRequest).count()
-            next_num = count + 1
+            # Strictly order by string length DESC, then string value DESC
+            # This ensures REQ-10000 (len 9) comes before REQ-9999 (len 8)
+            last_request = db.query(models.AssetRequest).filter(
+                models.AssetRequest.id.like("REQ-%")
+            ).order_by(
+                func.length(models.AssetRequest.id).desc(),
+                models.AssetRequest.id.desc()
+            ).first()
             
-    # Strict duplicate check loop to prevent race condition overlaps
-    while True:
-        new_id = f"REQ-{next_num:04d}"
-        exists = db.query(models.AssetRequest).filter(models.AssetRequest.id == new_id).first()
-        if not exists:
-            break
-        next_num += 1
-    
-    item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
-    
-    # Enforce first letter capitalization at the database level
-    if item and isinstance(item, str) and len(item) > 0:
-        item = item[0].upper() + item[1:]
-        
-    justification = request.justification
-    if justification and isinstance(justification, str) and len(justification) > 0:
-        justification = justification[0].upper() + justification[1:]
-    
-    # Adjust initial status based on selected reporting role from form
-    user = db.query(models.User).filter(models.User.id == request.requestedBy).first()
-    rr = request.selectedReportingRole or (user.reportingRole if user else None)
-    if rr:
-        status = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
-    else:
-        status = "Pending with Manager"
+            next_num = 1
+            if last_request:
+                try:
+                    num_part = last_request.id.split("-")[1]
+                    next_num = int(num_part) + 1
+                except:
+                    next_num = db.query(models.AssetRequest).count() + 1
+            
+            # If we failed on a previous attempt, skip ahead
+            next_num += attempt
+            
+            # Strict duplicate check loop (handles already committed duplicates)
+            while True:
+                new_id = f"REQ-{next_num:04d}"
+                exists = db.query(models.AssetRequest).filter(models.AssetRequest.id == new_id).first()
+                if not exists:
+                    break
+                next_num += 1
+            
+            item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
+            if item and isinstance(item, str) and len(item) > 0:
+                item = item[0].upper() + item[1:]
+                
+            justification = request.justification
+            if justification and isinstance(justification, str) and len(justification) > 0:
+                justification = justification[0].upper() + justification[1:]
+            
+            user = db.query(models.User).filter(models.User.id == request.requestedBy).first()
+            rr = request.selectedReportingRole or (user.reportingRole if user else None)
+            if rr:
+                status = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
+            else:
+                status = "Pending with Manager"
 
-    new_request = models.AssetRequest(
-        id=new_id,
-        item=item,
-        category=request.assetType,
-        amount=0,
-        justification=justification,
-        requestedBy=request.requestedBy,
-        forwardedTo=request.selectedReportingTo,
-        routedTo=request.selectedReportingTo,
-        status=status,
-        handledBy=[],
-        votes={},
-        approverSelections={},
-        commentsHistory=[],
-        attachments=request.attachments,
-        createdAt=datetime.now().isoformat(),
-        updatedAt=datetime.now().isoformat()
-    )
-    
-    db.add(new_request)
-    db.commit()
-    db.refresh(new_request)
-    return {c: getattr(new_request, c) for c in new_request.__table__.columns.keys()}
+            new_request = models.AssetRequest(
+                id=new_id,
+                item=item,
+                category=request.assetType,
+                amount=0,
+                justification=justification,
+                requestedBy=request.requestedBy,
+                forwardedTo=request.selectedReportingTo,
+                routedTo=request.selectedReportingTo,
+                status=status,
+                handledBy=[],
+                votes={},
+                approverSelections={},
+                commentsHistory=[],
+                attachments=request.attachments,
+                createdAt=datetime.now().isoformat(),
+                updatedAt=datetime.now().isoformat()
+            )
+            
+            db.add(new_request)
+            # This commit will throw an IntegrityError if a concurrent request took this ID
+            db.commit()
+            db.refresh(new_request)
+            return {c: getattr(new_request, c) for c in new_request.__table__.columns.keys()}
+            
+        except Exception as e:
+            db.rollback()
+            if attempt == max_retries - 1:
+                raise HTTPException(status_code=500, detail="Could not generate a unique Request ID after multiple attempts due to high concurrency. Please try again.")
+            time.sleep(0.05) # Backoff before retrying
 
 @app.put("/api/asset-requests/{request_id}/action")
 async def process_request_action(request_id: str, payload: ActionRequest, db: Session = Depends(get_db)):

@@ -6,7 +6,6 @@ import {
   Clock, CheckCircle, RotateCcw, XCircle, FileText, 
   Bell, Settings, ChevronLeft, ChevronRight, Users 
 } from 'lucide-react';
-import logoImage from '../assets/logo.png';
 
 const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen }) => {
   const navigate = useNavigate();
@@ -42,9 +41,9 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
       {/* Header */}
       <div className="h-20 flex items-center justify-between px-6 pt-4">
         <div className="flex items-center overflow-hidden">
-          <img src={logoImage} alt="Ardent Capital Logo" className="w-9 h-9 flex-shrink-0 object-contain mt-1" />
+          <img src="/logo.png" alt="Ardent Capital Logo" className="w-9 h-9 flex-shrink-0 object-contain mt-1" />
           {!isCollapsed && (
-            <div className="ml-1.5 flex flex-col whitespace-nowrap">
+            <div className="ml-1.5 mt-1.5 flex flex-col whitespace-nowrap">
               <span className="text-slate-900 font-extrabold text-[26px] leading-tight tracking-wide">Ardent Capital</span>
             </div>
           )}
