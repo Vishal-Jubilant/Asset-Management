@@ -305,9 +305,19 @@ const NewRequest = () => {
                           <div className="flex-1">
                             <p className="text-xs font-bold text-slate-800">{req.id}</p>
                             <p className="text-sm text-slate-600 mt-1 leading-snug">
-                              {req.status === 'Returned' || (req.commentsHistory && req.commentsHistory.length > 0 && req.commentsHistory[req.commentsHistory.length - 1].action === 'return') 
-                                ? <>Returned Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>
-                                : <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>}
+                              {(() => {
+                                const lastAction = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].action : null;
+                                const isReturned = req.status === 'Returned' || lastAction === 'return';
+                                
+                                if (lastAction === 'edit') {
+                                  return <>Updated Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
+                                } else if (isReturned) {
+                                  const returnerName = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].name : getRequesterName(req.requestedBy);
+                                  return <>Returned Request from <span className="font-semibold text-brand-600 capitalize">{returnerName}</span></>;
+                                } else {
+                                  return <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
+                                }
+                              })()}
                             </p>
                             <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatDateTime(req.createdAt)}</p>
                           </div>
