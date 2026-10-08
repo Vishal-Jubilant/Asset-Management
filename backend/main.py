@@ -582,6 +582,16 @@ async def process_request_action(request_id: str, payload: ActionRequest, db: Se
                     updatedForwardedTo = list(combinedForwardedTo)
                 else:
                     updatedForwardedTo = selectedApprovers if selectedApprovers else None
+                
+                if updatedForwardedTo:
+                    for target_name in updatedForwardedTo:
+                        t_name = target_name.get("value", target_name.get("label", str(target_name))) if isinstance(target_name, dict) else str(target_name)
+                        target_user = next((u for u in all_users if u.name.lower().strip() == t_name.lower().strip()), None)
+                        if target_user:
+                            if target_user.id in handledBy:
+                                handledBy.remove(target_user.id)
+                            if str(target_user.id) in votes:
+                                del votes[str(target_user.id)]
             else:
                 updatedForwardedTo = None
     elif action == 'return':
