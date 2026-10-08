@@ -29,6 +29,12 @@ const Admin = () => {
     const matchesRole = selectedFilterRoles.length === 0 || selectedFilterRoles.includes(user.role);
     
     return matchesSearch && matchesRole;
+  }).sort((a, b) => {
+    const aIsAdmin = a.role?.toLowerCase() === 'admin';
+    const bIsAdmin = b.role?.toLowerCase() === 'admin';
+    if (aIsAdmin && !bIsAdmin) return -1;
+    if (!aIsAdmin && bIsAdmin) return 1;
+    return 0;
   });
 
   useEffect(() => {

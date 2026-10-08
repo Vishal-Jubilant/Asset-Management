@@ -13,8 +13,6 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     empCode: '',
     mobile: '',
     role: '',
-    reportingRole: '',
-    reportingTo: [],
     password: '',
     status: 'Active'
   });
@@ -39,8 +37,6 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
         empCode: editingUser.empCode || '',
         mobile: editingUser.mobile || '',
         role: editingUser.role || '',
-        reportingRole: editingUser.reportingRole || '',
-        reportingTo: editingUser.reportingTo ? (Array.isArray(editingUser.reportingTo) ? editingUser.reportingTo : [editingUser.reportingTo]) : [],
         password: editingUser.password || '',
         status: editingUser.status || 'Active'
       });
@@ -51,8 +47,6 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
         empCode: '',
         mobile: '',
         role: '',
-        reportingRole: '',
-        reportingTo: [],
         password: '',
         status: 'Active'
       });
@@ -61,25 +55,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'role') {
-      const selectedRoleObj = roles.find(r => r.name === value);
-      const immediateHigherRole = selectedRoleObj ? roles.find(r => r.level === selectedRoleObj.level - 1) : null;
-      
-      setFormData({ 
-        ...formData, 
-        role: value,
-        reportingRole: immediateHigherRole ? immediateHigherRole.name : '',
-        reportingTo: []
-      });
-    } else if (name === 'reportingRole') {
-      setFormData({
-        ...formData,
-        reportingRole: value,
-        reportingTo: []
-      });
-    } else {
-      setFormData({ ...formData, [name]: value });
-    }
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleSubmit = (e) => {
@@ -116,8 +92,6 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
       empCode: '',
       mobile: '',
       role: '',
-      reportingRole: '',
-      reportingTo: [],
       password: '',
       status: 'Active'
     });
@@ -126,9 +100,6 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
 
   // Sort roles by level for display
   const sortedRoles = [...roles].sort((a, b) => a.level - b.level);
-  const currentRoleObj = sortedRoles.find(r => r.name === formData.role);
-  const isTopLevel = currentRoleObj?.level === 1;
-  const higherRoles = currentRoleObj ? sortedRoles.filter(r => r.level === currentRoleObj.level - 1) : [];
 
   const roleOptions = sortedRoles.map(r => {
     let isAllowed = true;
@@ -158,18 +129,8 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     { value: 'Inactive', label: 'Inactive' }
   ];
 
-  const reportingOptions = higherRoles.map(role => ({
-    value: role.name,
-    label: `L${role.level} – ${role.name.charAt(0).toUpperCase() + role.name.slice(1)}`
-  }));
-
-  const availablePersons = users.filter(u => u.role === formData.reportingRole);
-  const personOptions = availablePersons.map(u => ({
-    value: u.name,
-    label: u.name
-  }));
-
   const isEditingSystemAdmin = editingUser && editingUser.role?.toUpperCase() === 'ADMIN';
+
 
   if (!isOpen) return null;
 
@@ -274,40 +235,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   required={true}
                 />
               </div>
-              {!isEditingSystemAdmin && (
-                <>
-                  <div className="space-y-1.5 md:col-span-1">
-                    <label className="text-sm font-medium text-slate-700">
-                      Reporting Role {!isTopLevel && <span className="text-red-500">*</span>}
-                    </label>
-                    <CustomSelect
-                      name="reportingRole"
-                      options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : reportingOptions}
-                      value={formData.reportingRole}
-                      onChange={handleChange}
-                      placeholder="Select reporting role"
-                      disabled={isTopLevel || higherRoles.length <= 1}
-                      required={!isTopLevel}
-                    />
-                  </div>
-                  <div className="space-y-1.5 md:col-span-1">
-                    <label className="text-sm font-medium text-slate-700">
-                      Reporting Person {!isTopLevel && personOptions.length > 0 && <span className="text-red-500">*</span>}
-                    </label>
-                    <CustomSelect
-                      name="reportingTo"
-                      options={isTopLevel ? [{value: '', label: 'N/A (Top Level)'}] : personOptions}
-                      value={formData.reportingTo}
-                      onChange={handleChange}
-                      placeholder={formData.reportingRole && personOptions.length === 0 ? "No persons found" : "Select person"}
-                      disabled={isTopLevel || !formData.reportingRole || personOptions.length === 0}
-                      required={!isTopLevel && personOptions.length > 0}
-                      isMulti={!isTopLevel}
-                      menuPlacement="top"
-                    />
-                  </div>
-                </>
-              )}
+
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-sm font-medium text-slate-700">Password <span className="text-red-500">*</span></label>
                 <div className="relative group">

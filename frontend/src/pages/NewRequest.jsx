@@ -11,14 +11,19 @@ import { AppContext } from '../context/AppContext';
 
 const NewRequest = () => {
   const navigate = useNavigate();
-  const { currentUser, requests, setRequests, users } = useContext(AppContext);
+  const { currentUser, requests, setRequests, users, roles } = useContext(AppContext);
   const user = currentUser;
+  
+  const maxRoleLevel = roles && roles.length > 0 ? Math.max(...roles.map(r => r.level || 1)) : 0;
+  const currentUserRoleObj = roles?.find(r => r.name === user?.role);
+  const isLastLevel = currentUserRoleObj && currentUserRoleObj.level === maxRoleLevel;
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilters, setStatusFilters] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
   const [requestToDelete, setRequestToDelete] = useState(null);
   const [selectedRequestForModal, setSelectedRequestForModal] = useState(null);
+  const [editRequestForModal, setEditRequestForModal] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const filterRef = useRef(null);
 
@@ -26,16 +31,25 @@ const NewRequest = () => {
 
   const pendingRequestsForMe = requests.filter(r => {
     if (user?.role === 'admin') return r.status?.includes('Pending');
+    
+    if (r.requestedBy === user?.id) {
+       return r.status === 'Returned';
+    }
+    
     const requester = users.find(u => u.id === r.requestedBy);
     if (!requester) return false;
     
-    const isReportingToMe = (() => {
+    const isForwardedToMe = (() => {
       if (r.forwardedTo && r.forwardedTo.length > 0) {
         return (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
           const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
           return nameStr?.toLowerCase()?.trim() === user?.name?.toLowerCase()?.trim();
         });
       }
+      return false;
+    })();
+
+    const isReportingToMe = (() => {
       if (r.routedTo) {
         return Array.isArray(r.routedTo) ? r.routedTo.includes(user?.name) : r.routedTo === user?.name;
       }
@@ -43,8 +57,19 @@ const NewRequest = () => {
         ? requester.reportingTo.includes(user?.name)
         : requester.reportingTo === user?.name;
     })();
-      
-    return r.status?.includes('Pending') && isReportingToMe;
+
+    if (!r.status?.includes('Pending')) return false;
+
+    if (isForwardedToMe) return true;
+
+    const hasVoted = r.handledBy && r.handledBy.includes(user?.id);
+    const roleName = user?.role === 'md' ? 'MD' : (user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : '');
+    
+    if (r.status === `Pending with ${roleName}` && (!r.forwardedTo || r.forwardedTo.length === 0) && isReportingToMe && !hasVoted) {
+      return true;
+    }
+    
+    return false;
   });
 
   const prevPendingCount = useRef(pendingRequestsForMe.length);
@@ -91,18 +116,22 @@ const NewRequest = () => {
       prev.includes(option) ? prev.filter(f => f !== option) : [...prev, option]
     );
   };
-  const handleAction = async (action, req, remarks, selectedApprovers) => {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
     if (action === 'delete') {
       setRequestToDelete(req);
-    } else if (action === 'viewDetailsModal') {
+    } else if (action === 'viewDetailsModal' || action === 'view') {
       setSelectedRequestForModal(req);
       setIsDetailsModalOpen(true);
+    } else if (action === 'edit') {
+      setEditRequestForModal(req);
+      setIsNewRequestModalOpen(true);
     } else if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
           action: action,
           remarks: remarks,
           selectedApprovers: selectedApprovers,
+          selectedReportingRole: selectedReportingRole,
           userId: user?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
@@ -126,18 +155,30 @@ const NewRequest = () => {
 
   const handleAddRequest = async (data) => {
     try {
+      const selectedPerson = data.selectedReportingTo;
+      const forwardTo = selectedPerson
+        ? (Array.isArray(selectedPerson) ? selectedPerson : [selectedPerson])
+        : (Array.isArray(user?.reportingTo) ? user.reportingTo : user?.reportingTo ? [user.reportingTo] : []);
+
       const payload = {
         assetType: data.assetType,
         otherAssetType: data.otherAssetType || '',
         description: data.description,
         justification: data.justification,
-        selectedReportingTo: data.selectedReportingTo || (Array.isArray(user?.reportingTo) ? user.reportingTo : user?.reportingTo ? [user.reportingTo] : []),
+        selectedReportingTo: forwardTo,
+        selectedReportingRole: data.selectedReportingRole || '',
         requestedBy: user?.id || 1,
         attachments: data.attachments || []
       };
       
-      const response = await api.post('/asset-requests', payload);
-      setRequests([response.data, ...requests]);
+      if (editRequestForModal) {
+        const response = await api.put(`/asset-requests/${editRequestForModal.id}`, payload);
+        setRequests(requests.map(r => r.id === editRequestForModal.id ? response.data : r));
+      } else {
+        const response = await api.post('/asset-requests', payload);
+        setRequests([response.data, ...requests]);
+      }
+      setEditRequestForModal(null);
     } catch (error) {
       console.error('Failed to create asset request:', error);
       alert('Failed to create request. Please try again.');
@@ -195,13 +236,6 @@ const NewRequest = () => {
       const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
       
       let displayStatus = r.status;
-      if (r.requestedBy !== currentUser?.id) {
-        const vote = r.votes && r.votes[currentUser?.id];
-        if (vote === 'approve') displayStatus = 'Approved';
-        else if (vote === 'reject') displayStatus = 'Rejected';
-        else if (vote === 'return') displayStatus = 'Returned';
-        else displayStatus = 'Pending';
-      }
 
       return [
         escapeCSV(r.id),
@@ -263,7 +297,7 @@ const NewRequest = () => {
                 {pendingRequestsForMe.length > 0 ? (
                   <div className="flex flex-col">
                     {pendingRequestsForMe.map((req, idx) => (
-                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate('/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isLastLevel ? '/app/new-request' : '/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
                         <div className="flex items-start gap-3">
                           <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                             <Package size={14} />
@@ -271,7 +305,9 @@ const NewRequest = () => {
                           <div className="flex-1">
                             <p className="text-xs font-bold text-slate-800">{req.id}</p>
                             <p className="text-sm text-slate-600 mt-1 leading-snug">
-                              New Request from <span className="font-semibold text-brand-600">{getRequesterName(req.requestedBy)}</span>
+                              {req.status === 'Returned' || (req.commentsHistory && req.commentsHistory.length > 0 && req.commentsHistory[req.commentsHistory.length - 1].action === 'return') 
+                                ? <>Returned Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>
+                                : <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>}
                             </p>
                             <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatDateTime(req.createdAt)}</p>
                           </div>
@@ -295,7 +331,7 @@ const NewRequest = () => {
                     className="text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors" 
                     onClick={() => {
                       setIsNotificationOpen(false);
-                      navigate('/app/my-requests');
+                      navigate(isLastLevel ? '/app/new-request' : '/app/my-requests');
                     }}
                   >
                     View All Requests
@@ -404,8 +440,12 @@ const NewRequest = () => {
 
       <NewRequestModal 
         isOpen={isNewRequestModalOpen} 
-        onClose={() => setIsNewRequestModalOpen(false)} 
-        onAdd={handleAddRequest} 
+        onClose={() => {
+          setIsNewRequestModalOpen(false);
+          setEditRequestForModal(null);
+        }} 
+        onAdd={handleAddRequest}
+        editRequest={editRequestForModal}
       />
 
       {requestToDelete && (

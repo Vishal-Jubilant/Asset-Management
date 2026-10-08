@@ -57,7 +57,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { currentUser, requests, setRequests, users, roles } = useContext(AppContext);
   const user = currentUser;
-  
+
   const maxRoleLevel = roles && roles.length > 0 ? Math.max(...roles.map(r => r.level || 1)) : 0;
   const currentUserRoleObj = roles?.find(r => r.name === user?.role);
   const isLastLevel = currentUserRoleObj && currentUserRoleObj.level === maxRoleLevel;
@@ -78,18 +78,47 @@ const Dashboard = () => {
     const data = [];
     const now = new Date();
 
-    const getStatusForCreated = (r) => {
+    const getDisplayStatus = (r) => {
+      const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+      let isCurrentlyPendingWithMe = false;
+      if (r.status === `Pending with ${roleName}`) {
+        if (!r.forwardedTo || r.forwardedTo.length === 0) {
+          isCurrentlyPendingWithMe = true;
+        } else {
+          isCurrentlyPendingWithMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          });
+        }
+      }
+
+      if (isCurrentlyPendingWithMe) return r.status || '';
+
+      if (r.requestedBy !== currentUser?.id && r.handledBy && r.handledBy.includes(currentUser?.id)) {
+        const myLastAction = [...(r.commentsHistory || [])].reverse().find(c => c.name === currentUser?.name);
+        if (myLastAction) {
+          if (myLastAction.action === 'approve') return 'Approved';
+          if (myLastAction.action === 'reject') return 'Rejected';
+          if (myLastAction.action === 'return') return 'Returned';
+        }
+        return 'Handled';
+      }
+
+      if (r.commentsHistory && r.commentsHistory.length > 0) {
+        const lastAction = r.commentsHistory[r.commentsHistory.length - 1];
+        if (lastAction.action === 'return' && r.requestedBy === currentUser?.id) {
+          return 'Returned';
+        }
+      }
       return r.status || '';
     };
 
+    const getStatusForCreated = (r) => {
+      return getDisplayStatus(r);
+    };
+
     const getStatusForReceived = (r) => {
-      let status = r.status || '';
-      if (r.requestedBy !== user?.id) {
-        const vote = r.votes && r.votes[user?.id];
-        if (vote === 'approve') return 'Approved';
-        if (vote === 'reject') return 'Rejected';
-        if (vote === 'return') return 'Returned';
-      }
+      let status = getDisplayStatus(r);
       if (status.includes('Pending')) return 'Pending';
       return status;
     };
@@ -144,16 +173,24 @@ const Dashboard = () => {
   const pendingRequestsForMe = requests.filter(r => {
     if (user?.role === 'admin') return r.status?.includes('Pending');
     
+    if (r.requestedBy === user?.id) {
+       return r.status === 'Returned';
+    }
+    
     const requester = users.find(u => u.id === r.requestedBy);
     if (!requester) return false;
     
-    const isReportingToMe = (() => {
+    const isForwardedToMe = (() => {
       if (r.forwardedTo && r.forwardedTo.length > 0) {
         return (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
           const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
           return nameStr?.toLowerCase()?.trim() === user?.name?.toLowerCase()?.trim();
         });
       }
+      return false;
+    })();
+
+    const isReportingToMe = (() => {
       if (r.routedTo) {
         return Array.isArray(r.routedTo) ? r.routedTo.includes(user?.name) : r.routedTo === user?.name;
       }
@@ -161,9 +198,20 @@ const Dashboard = () => {
         ? requester.reportingTo.includes(user?.name)
         : requester.reportingTo === user?.name;
     })();
-      
-    const hasVoted = r.votes && r.votes[user?.id];
-    return r.status?.includes('Pending') && isReportingToMe && !hasVoted;
+
+    if (!r.status?.includes('Pending')) return false;
+
+    const hasVoted = r.handledBy && r.handledBy.includes(user?.id);
+    if (hasVoted) return false;
+
+    if (isForwardedToMe) return true;
+    const roleName = user?.role === 'md' ? 'MD' : (user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : '');
+    
+    if (r.status === `Pending with ${roleName}` && (!r.forwardedTo || r.forwardedTo.length === 0) && isReportingToMe && !hasVoted) {
+      return true;
+    }
+    
+    return false;
   });
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(pendingRequestsForMe.length > 0);
@@ -190,13 +238,14 @@ const Dashboard = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleAction = async (action, req, remarks, selectedApprovers) => {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
     if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
           action: action,
           remarks: remarks,
           selectedApprovers: selectedApprovers,
+          selectedReportingRole: selectedReportingRole,
           userId: user?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
@@ -448,7 +497,7 @@ const Dashboard = () => {
                   {pendingRequestsForMe.length > 0 ? (
                     <div className="flex flex-col">
                       {pendingRequestsForMe.map((req, idx) => (
-                        <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate('/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                        <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isLastLevel ? '/app/new-request' : '/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
                           <div className="flex items-start gap-3">
                             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                               <Package size={14} />
@@ -456,7 +505,19 @@ const Dashboard = () => {
                             <div className="flex-1">
                               <p className="text-xs font-bold text-slate-800">{req.id}</p>
                               <p className="text-sm text-slate-600 mt-1 leading-snug">
-                                New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span>
+                                {(() => {
+                                  const lastAction = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].action : null;
+                                  const isReturned = req.status === 'Returned' || lastAction === 'return';
+                                  
+                                  if (lastAction === 'edit') {
+                                    return <>Updated Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
+                                  } else if (isReturned) {
+                                    const returnerName = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].name : getRequesterName(req.requestedBy);
+                                    return <>Returned Request from <span className="font-semibold text-brand-600 capitalize">{returnerName}</span></>;
+                                  } else {
+                                    return <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
+                                  }
+                                })()}
                               </p>
                               <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatDateTime(req.createdAt)}</p>
                             </div>
@@ -480,7 +541,7 @@ const Dashboard = () => {
                       className="text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors" 
                       onClick={() => {
                         setIsNotificationOpen(false);
-                        navigate('/app/my-requests');
+                        navigate(isLastLevel ? '/app/new-request' : '/app/my-requests');
                       }}
                     >
                       View All Requests

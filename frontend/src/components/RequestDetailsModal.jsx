@@ -41,6 +41,9 @@ const TimelineNode = ({ status }) => {
   } else if (status === 'return' || status === 'returned') {
     icon = <RotateCcw className="w-3 h-3 text-white" strokeWidth={2.5} />;
     bgClass = "bg-amber-500 ring-4 ring-white";
+  } else if (status === 'edit') {
+    icon = <Check className="w-3 h-3 text-white" strokeWidth={3} />;
+    bgClass = "bg-blue-500 ring-4 ring-white";
   } else if (status === 'pending') {
     icon = <Clock className="w-3 h-3 text-white" strokeWidth={2.5} />;
     bgClass = "bg-amber-500 ring-4 ring-white";
@@ -60,7 +63,7 @@ const TimelineNode = ({ status }) => {
 };
 
 // Extracted Stepper component for the grouped comments
-const LevelGroup = ({ group, isLastLevel, formatDateTime }) => {
+const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
   // Determine if this group is fully approved. If so, start collapsed.
   const isFullyApproved = group.comments.every(c => c.voteAction === 'approve');
   const [isExpanded, setIsExpanded] = useState(!isFullyApproved);
@@ -83,7 +86,7 @@ const LevelGroup = ({ group, isLastLevel, formatDateTime }) => {
             ) : (
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
             )}
-            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{group.role} LEVEL</h4>
+            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{stepNumber}. {group.role} LEVEL</h4>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
@@ -99,18 +102,21 @@ const LevelGroup = ({ group, isLastLevel, formatDateTime }) => {
                 c.voteAction === 'approve' ? 'ring-emerald-100' :
                 c.voteAction === 'reject' ? 'ring-rose-100' :
                 c.voteAction === 'return' || c.voteAction === 'pending' ? 'ring-amber-100' :
+                c.voteAction === 'edit' ? 'ring-blue-100' :
                 'ring-slate-100';
 
               const statusVariant = 
                 c.voteAction === 'approve' ? 'green' : 
                 c.voteAction === 'reject' ? 'red' : 
                 c.voteAction === 'return' ? 'amber' : 
+                c.voteAction === 'edit' ? 'blue' : 
                 c.voteAction === 'pending' ? 'amber' : 'default';
                 
               const statusLabel = 
                 c.voteAction === 'approve' ? 'Approved' :
                 c.voteAction === 'reject' ? 'Declined' :
                 c.voteAction === 'return' ? 'Returned' :
+                c.voteAction === 'edit' ? 'Resubmitted' :
                 c.voteAction === 'pending' ? 'Pending' : 'Awaiting';
 
               const commentText = c.comment.replace('[System: ', '').replace(']', '');
@@ -149,7 +155,7 @@ const LevelGroup = ({ group, isLastLevel, formatDateTime }) => {
                     <div className="space-y-1">
                       {c.sentToStr && (
                         <div className="flex items-center gap-1.5 min-h-[20px]">
-                          <span className="font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">Sent to:</span>
+                          <span className="font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{c.voteAction === 'return' ? 'Returned to:' : 'Sent to:'}</span>
                           <span>{c.sentToStr}</span>
                         </div>
                       )}
@@ -180,17 +186,23 @@ const LevelGroup = ({ group, isLastLevel, formatDateTime }) => {
 };
 
 const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
-  const { users, currentUser } = useContext(AppContext);
+  const { users, currentUser, roles } = useContext(AppContext);
   const [newComment, setNewComment] = useState('');
   const [isApproving, setIsApproving] = useState(false);
+  const [isReturning, setIsReturning] = useState(false);
+  const [returnTarget, setReturnTarget] = useState('');
   const [selectedApprovers, setSelectedApprovers] = useState([]);
+  const [selectedReportingRole, setSelectedReportingRole] = useState('');
   const [validationError, setValidationError] = useState('');
   
   useEffect(() => {
     if (isOpen && request) {
       setNewComment('');
       setIsApproving(false);
+      setIsReturning(false);
+      setReturnTarget('');
       setSelectedApprovers([]);
+      setSelectedReportingRole('');
       setValidationError('');
     }
   }, [isOpen, request]);
@@ -215,22 +227,38 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const isHandled = request.handledBy && request.handledBy.includes(currentUser?.id);
   const isRequester = request.requestedBy === currentUser?.id;
   
-  const isApprover = (() => {
-    if (!request.status.includes('Pending')) return false;
+  const isForwardedToMe = (() => {
     if (request.forwardedTo && request.forwardedTo.length > 0) {
       return (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).some(n => {
         const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
         return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
       });
     }
+    return false;
+  })();
+
+  const isApprover = (() => {
+    if (isForwardedToMe) return true;
+    if (!request.status.includes('Pending')) return false;
     return request.status === `Pending with ${myRole}`;
   })();
 
-  const showActions = !isHandled && !isRequester && isApprover;
+  const hasVoted = request.votes && !!request.votes[currentUser?.id];
+  const showActions = !hasVoted && !isRequester && isApprover;
 
   const handleActionClick = (actionStr) => {
+    if (actionStr === 'return') {
+      if (!newComment.trim()) {
+        setValidationError('Please add a comment before returning for edits.');
+        return;
+      }
+      if (!returnTarget) {
+        setValidationError('Please select a person to return the request to.');
+        return;
+      }
+    }
     if (onAction) {
-      onAction(actionStr, request, newComment, selectedApprovers);
+      onAction(actionStr, request, newComment, actionStr === 'return' ? [returnTarget] : selectedApprovers, selectedReportingRole);
       onClose();
     }
   };
@@ -307,7 +335,14 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       const u = users.find(user => user.name === c.name);
       const voteAction = c.action || (u ? request.votes?.[u.id] : undefined);
       const sentToObj = u && request.approverSelections ? request.approverSelections[u.id] : undefined;
-      const sentToStr = sentToObj ? (Array.isArray(sentToObj) ? sentToObj.join(', ') : sentToObj) : '';
+      const sentToStr = sentToObj ? (Array.isArray(sentToObj) ? sentToObj : [sentToObj]).map(name => {
+        const targetUser = users.find(user => user.name === name);
+        if (targetUser) {
+          const roleStr = targetUser.role === 'md' ? 'MD' : (targetUser.role ? targetUser.role.charAt(0).toUpperCase() + targetUser.role.slice(1).toLowerCase() : '');
+          return `${name} • ${roleStr}`;
+        }
+        return name;
+      }).join(', ') : '';
       
       const enrichedComment = { ...c, originalIdx, receivedDate, voteAction, sentToStr };
       
@@ -340,7 +375,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             <h2 className="text-[18px] font-semibold text-slate-900">{request.item}</h2>
             <Badge variant={overallStatusVariant}>
               <span className="flex items-center gap-1.5">
-                {overallStatusIcon} {request.status}
+                {overallStatusIcon} {request.status.startsWith('Pending') ? 'Pending' : request.status}
               </span>
             </Badge>
           </div>
@@ -446,7 +481,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           {showActions && (
             <div>
               <div className="flex justify-between items-end mb-2">
-                <Label>Your Comments {isApproving ? '(Optional)' : ''}</Label>
+                <Label>Your Comments {isReturning ? <span className="text-red-500">*</span> : isApproving ? '(Optional)' : ''}</Label>
                 <span className="text-[11px] text-slate-400">{newComment.length}/500</span>
               </div>
               <textarea
@@ -468,6 +503,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <LevelGroup 
                     key={idx} 
                     group={group} 
+                    stepNumber={groupedComments.length - idx}
                     isLastLevel={idx === groupedComments.length - 1} 
                     formatDateTime={formatDateTime}
                   />
@@ -492,53 +528,114 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         {/* Actions Footer */}
         {showActions && (
           <div className="flex flex-col relative shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)]">
+            {/* Return for edits panel */}
+            {isReturning && (() => {
+              // Build list of users to return to: the requester and all previous approvers
+              const involvedNames = new Set();
+              if (requester && requester.name) involvedNames.add(requester.name);
+              
+              if (request.commentsHistory && request.commentsHistory.length > 0) {
+                request.commentsHistory.forEach(action => {
+                  if (action && action.name && action.name !== currentUser?.name) {
+                    involvedNames.add(action.name);
+                  }
+                });
+              }
+              const involvedOptions = [...involvedNames]
+                .map(name => {
+                  const u = users.find(u => u.name?.toLowerCase().trim() === name?.toLowerCase().trim());
+                  return u && u.name !== currentUser?.name ? {
+                    value: u.name,
+                    label: `${u.name} • ${u.role === 'md' ? 'MD' : (u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : '')}`
+                  } : null;
+                })
+                .filter(Boolean)
+                .reverse();
+
+              return (
+                <div className="px-6 py-4 border-t border-slate-200 bg-amber-50/60 space-y-3">
+                  <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Return for Edits</span>
+
+                  <div>
+                    <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                      Return to <span className="text-red-500">*</span>
+                    </label>
+                    <CustomSelect
+                      name="returnTarget"
+                      options={involvedOptions}
+                      value={returnTarget}
+                      onChange={e => { setReturnTarget(e.target.value); setValidationError(''); }}
+                      placeholder="Select person to return to..."
+                      menuPlacement="top"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
             {isApproving && (
               <div className="px-6 py-4 border-t border-slate-200 bg-blue-50/50">
                 <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-3 block">Next Step Setup</span>
                 <div className="flex flex-col gap-2">
                   {(() => {
-                    let targets = [];
-                    if (Array.isArray(currentUser?.reportingTo)) {
-                       targets = currentUser.reportingTo;
-                    } else if (currentUser?.reportingTo) {
-                       targets = [currentUser.reportingTo];
-                    }
+                    const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+                    const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
 
-                    if (targets.length === 0) {
+                    if (currentUserLevel === 1) {
                       return <span className="text-sm font-semibold text-slate-700">You are providing final approval.</span>;
                     }
 
-                    const targetRoleName = currentUser?.reportingRole 
-                      ? (currentUser.reportingRole === 'md' ? 'MD' : currentUser.reportingRole.charAt(0).toUpperCase() + currentUser.reportingRole.slice(1).toLowerCase()) 
-                      : 'Role';
+                    const higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
+                    const availablePersons = users.filter(u => u.role === selectedReportingRole);
 
-                    const avatarContent = selectedApprovers.length === 1 
-                      ? selectedApprovers[0].charAt(0).toUpperCase() 
-                      : (selectedApprovers.length > 1 ? selectedApprovers.length : targetRoleName.charAt(0).toUpperCase());
+                    const formatLabel = (str) => {
+                      if (!str) return '';
+                      if (str.toLowerCase() === 'md') return 'MD';
+                      return str.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                    };
 
                     return (
-                      <div className="flex items-center gap-3 p-1">
-                         <div className="w-8 h-8 min-w-[32px] rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                           {avatarContent}
-                         </div>
-                         <span className="text-[13px] font-medium text-slate-600 whitespace-nowrap">Forward to:</span>
-                         <div className="w-full max-w-[240px]">
-                           <CustomSelect
-                             name="selectedApprovers"
-                             options={targets.map(t => ({ value: t, label: t }))}
-                             value={selectedApprovers}
-                             onChange={(e) => {
-                               setSelectedApprovers(e.target.value);
-                               setValidationError('');
-                             }}
-                             placeholder="Select person"
-                             isMulti={true}
-                             menuPlacement="top"
-                           />
-                         </div>
-                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-700 uppercase tracking-wider ml-auto whitespace-nowrap">
-                           {targetRoleName}
-                         </span>
+                      <div className="flex flex-col gap-3 p-1">
+                        <div>
+                          <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                            Reporting Role <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <CustomSelect
+                              name="selectedReportingRole"
+                              options={higherRoles.map(r => ({ value: r.name, label: formatLabel(r.name) }))}
+                              value={selectedReportingRole}
+                              onChange={(e) => {
+                                setSelectedReportingRole(e.target.value);
+                                setSelectedApprovers([]);
+                                setValidationError('');
+                              }}
+                              placeholder="Select reporting role"
+                              menuPlacement="top"
+                            />
+                          </div>
+                        </div>
+                        {selectedReportingRole && (
+                          <div>
+                            <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                              Forward to <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <CustomSelect
+                                 name="selectedApprovers"
+                                 options={availablePersons.map(u => ({ value: u.name, label: formatLabel(u.name) }))}
+                                 value={selectedApprovers}
+                                 onChange={(e) => {
+                                   setSelectedApprovers(e.target.value);
+                                   setValidationError('');
+                                 }}
+                                 placeholder="Select person(s)"
+                                 isMulti={true}
+                                 menuPlacement="top"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -559,17 +656,24 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   if (isApproving) {
                     setIsApproving(false);
                     setSelectedApprovers([]);
+                    setValidationError('');
+                  } else if (isReturning) {
+                    setIsReturning(false);
+                    setReturnTarget('');
+                    setValidationError('');
                   } else {
-                    handleActionClick('return');
+                    setIsReturning(true);
+                    setIsApproving(false);
+                    setValidationError('');
                   }
                 }}
-                className={`px-4 py-2.5 text-sm font-semibold bg-white border rounded-lg transition-colors focus:ring-2 ${isApproving ? 'border-slate-200 text-slate-600 hover:bg-slate-50 focus:ring-slate-200' : 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300 focus:ring-amber-500/20'}`}
+                className={`px-4 py-2.5 text-sm font-semibold bg-white border rounded-lg transition-colors focus:ring-2 ${(isApproving || isReturning) ? 'border-slate-200 text-slate-600 hover:bg-slate-50 focus:ring-slate-200' : 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300 focus:ring-amber-500/20'}`}
               >
-                {isApproving ? 'Cancel' : 'Return for edits'}
+                {(isApproving || isReturning) ? 'Cancel' : 'Return for edits'}
               </button>
               
               <div className="flex gap-3">
-                {!isApproving && (
+                {!isApproving && !isReturning && (
                   <button 
                     onClick={() => handleActionClick('reject')}
                     className="px-5 py-2.5 text-sm font-semibold text-rose-600 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 rounded-lg transition-colors focus:ring-2 focus:ring-rose-500/20"
@@ -580,35 +684,34 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                 
                 <button 
                   onClick={() => {
-                    if (isApproving) {
+                    if (isReturning) {
+                      handleActionClick('return');
+                    } else if (isApproving) {
                       const unvoted = request.forwardedTo ? (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).filter(nameObj => {
                         const name = typeof nameObj === 'object' ? nameObj.value || nameObj.label : String(nameObj);
                         const u = users.find(user => user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim());
                         return u && !request.handledBy?.includes(u.id) && u.id !== currentUser?.id;
                       }) : [];
+                      const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+                      const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
                       const isLastVoter = unvoted.length === 0;
-                      const hasReportingTo = currentUser?.reportingTo && currentUser.reportingTo.length > 0;
-                      const requiresSelection = isLastVoter && hasReportingTo && (!selectedApprovers || selectedApprovers.length === 0);
+                      
+                      const requiresSelection = isLastVoter && currentUserLevel > 1 && (!selectedApprovers || selectedApprovers.length === 0 || !selectedReportingRole);
                       
                       if (requiresSelection) {
-                        setValidationError("You are the final approver for this stage. You must select who to send it to next.");
+                        setValidationError("You must select a reporting role and person to forward to.");
                         return;
                       }
                       handleActionClick('approve');
                     } else {
                       setIsApproving(true);
-                      let targets = [];
-                      if (Array.isArray(currentUser?.reportingTo)) {
-                         targets = currentUser.reportingTo;
-                      } else if (currentUser?.reportingTo) {
-                         targets = [currentUser.reportingTo];
-                      }
-                      setSelectedApprovers(targets);
+                      setSelectedApprovers([]);
+                      setSelectedReportingRole('');
                     }
                   }}
-                  className="px-6 py-2.5 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm shadow-green-600/20 transition-all focus:ring-2 focus:ring-green-600/30 flex items-center gap-2"
+                  className={`px-6 py-2.5 text-sm font-semibold text-white rounded-lg shadow-sm transition-all focus:ring-2 flex items-center gap-2 ${isReturning ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 focus:ring-amber-500/30' : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 focus:ring-green-600/30'}`}
                 >
-                  <Check className="w-4 h-4" /> {isApproving ? 'Confirm Approval' : 'Approve Request'}
+                  <Check className="w-4 h-4" /> {isReturning ? 'Confirm Return' : isApproving ? 'Confirm Approval' : 'Approve Request'}
                 </button>
               </div>
             </div>

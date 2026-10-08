@@ -4,53 +4,56 @@ import Button from './Button';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 
-const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
-  const { currentUser, categories } = useContext(AppContext);
+const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
+  const { currentUser, categories, roles, users } = useContext(AppContext);
 
-  const isMultiReporting = Array.isArray(currentUser?.reportingTo) && currentUser.reportingTo.length > 1;
-  const hasReportingTo = currentUser?.reportingTo && (!Array.isArray(currentUser.reportingTo) || currentUser.reportingTo.length > 0);
+  const currentUserRole = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+  const currentUserLevel = currentUserRole ? currentUserRole.level : Infinity;
   
-  const defaultReportingTo = isMultiReporting 
-    ? currentUser.reportingTo 
-    : (hasReportingTo ? (Array.isArray(currentUser.reportingTo) ? currentUser.reportingTo[0] : currentUser.reportingTo) : '');
+  // Lower level number = higher authority (e.g., MD=level1, User=level2)
+  // So roles that can approve must have a LOWER level number
+  let higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
+
+  if (editRequest && editRequest.commentsHistory && editRequest.commentsHistory.length > 0) {
+    const involvedRoles = new Set(editRequest.commentsHistory.map(c => c.role?.toLowerCase()));
+    higherRoles = higherRoles.filter(r => involvedRoles.has(r.name?.toLowerCase()));
+  }
 
   const [formData, setFormData] = useState({
     assetType: '',
     otherAssetType: '',
     description: '',
     justification: '',
-    selectedReportingTo: defaultReportingTo
+    selectedReportingRole: '',
+    selectedReportingTo: []
   });
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [fileError, setFileError] = useState('');
+  const [validationError, setValidationError] = useState('');
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
-      // reset form when opening
-      setFormData(prev => ({
-        assetType: prev.assetType,
-        otherAssetType: prev.otherAssetType,
-        description: prev.description,
-        justification: prev.justification,
-        selectedReportingTo: defaultReportingTo
-      }));
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-  }, [defaultReportingTo]);
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      setFormData({
-        assetType: '',
-        otherAssetType: '',
-        description: '',
-        justification: '',
-        selectedReportingTo: defaultReportingTo
-      });
+      if (editRequest) {
+        setFormData({
+          assetType: categories.some(c => c.value === editRequest.category) ? editRequest.category : 'Other',
+          otherAssetType: categories.some(c => c.value === editRequest.category) ? '' : editRequest.category,
+          description: editRequest.item || '',
+          justification: editRequest.justification || '',
+          selectedReportingRole: '',
+          selectedReportingTo: []
+        });
+      } else {
+        setFormData({
+          assetType: '',
+          otherAssetType: '',
+          description: '',
+          justification: '',
+          selectedReportingRole: '',
+          selectedReportingTo: []
+        });
+      }
       setAttachedFiles([]);
       setFileError('');
     } else {
@@ -59,7 +62,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, editRequest, categories]);
 
   if (!isOpen) return null;
 
@@ -95,11 +98,23 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
       formattedValue = formattedValue.charAt(0).toUpperCase() + formattedValue.slice(1);
     }
     
-    setFormData(prev => ({ ...prev, [name]: formattedValue }));
+    setFormData(prev => {
+      const newData = { ...prev, [name]: formattedValue };
+      if (name === 'selectedReportingRole') {
+        newData.selectedReportingTo = [];
+      }
+      return newData;
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setValidationError('');
+    
+    if (!formData.selectedReportingRole || !formData.selectedReportingTo || formData.selectedReportingTo.length === 0) {
+      setValidationError('Please select a Reporting Role and Reporting Person before submitting.');
+      return;
+    }
     
     const filePromises = attachedFiles.map(file => {
       return new Promise((resolve, reject) => {
@@ -120,20 +135,11 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
     }
   };
 
-  const roleLabel = currentUser?.reportingRole
-    ? (currentUser.reportingRole.toLowerCase() === 'md' ? 'MD' : currentUser.reportingRole.charAt(0).toUpperCase() + currentUser.reportingRole.slice(1).toLowerCase())
-    : 'Manager';
-
-  const avatarLetter = (() => {
-    if (Array.isArray(formData.selectedReportingTo)) {
-      if (formData.selectedReportingTo.length === 1) return formData.selectedReportingTo[0].charAt(0).toUpperCase();
-      if (formData.selectedReportingTo.length > 1) return formData.selectedReportingTo.length;
-      return roleLabel.charAt(0).toUpperCase();
-    } else if (formData.selectedReportingTo) {
-      return formData.selectedReportingTo.charAt(0).toUpperCase();
-    }
-    return roleLabel.charAt(0).toUpperCase();
-  })();
+  let availablePersons = users.filter(u => u.role === formData.selectedReportingRole);
+  if (editRequest && editRequest.commentsHistory && editRequest.commentsHistory.length > 0) {
+    const involvedNames = new Set(editRequest.commentsHistory.map(c => c.name?.toLowerCase()));
+    availablePersons = availablePersons.filter(u => involvedNames.has(u.name?.toLowerCase()));
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -147,8 +153,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
               <Package size={20} />
             </div>
             <div>
-              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">Create Request</h2>
-              <p className="text-[13px] text-slate-500 mt-0.5">Submit a new request for IT hardware or software.</p>
+              <h2 className="text-[17px] font-bold text-slate-900 tracking-tight">{editRequest ? 'Edit Request' : 'Create Request'}</h2>
+              <p className="text-[13px] text-slate-500 mt-0.5">{editRequest ? 'Resubmit your returned request.' : 'Submit a new request for IT hardware or software.'}</p>
             </div>
           </div>
           <button
@@ -162,6 +168,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
         {/* Scrollable content */}
         <div className="overflow-y-auto flex-1 p-6 bg-white">
           <form id="new-request-form" onSubmit={handleSubmit} className="bg-slate-50/60 border border-slate-200/75 rounded-2xl p-5 space-y-6">
+
+
 
             {/* User + Category row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -276,47 +284,109 @@ const NewRequestModal = ({ isOpen, onClose, onAdd }) => {
                 </div>
               )}
             </div>
+
+            {/* Previous Comments */}
+            {editRequest && editRequest.commentsHistory && editRequest.commentsHistory.length > 0 && (
+              <div className="mt-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+                <h3 className="text-[13px] font-bold text-slate-900 mb-3 uppercase tracking-wider flex items-center gap-1.5">
+                  <User size={14} className="text-slate-400" />
+                  Approval Workflow Comments
+                </h3>
+                <div className="space-y-3">
+                  {editRequest.commentsHistory.map((c, i) => {
+                    const u = users.find(user => user.name === c.name);
+                    const sentToObj = u && editRequest.approverSelections ? editRequest.approverSelections[u.id] : undefined;
+                    const sentToStr = sentToObj ? (Array.isArray(sentToObj) ? sentToObj : [sentToObj]).map(name => {
+                      const targetUser = users.find(user => user.name === name);
+                      if (targetUser) {
+                        const roleStr = targetUser.role === 'md' ? 'MD' : (targetUser.role ? targetUser.role.charAt(0).toUpperCase() + targetUser.role.slice(1).toLowerCase() : '');
+                        return `${name} (${roleStr})`;
+                      }
+                      return name;
+                    }).join(', ') : '';
+
+                    return (
+                      <div key={i} className={`p-3 rounded-lg border ${c.action === 'return' ? 'bg-amber-50/50 border-amber-100' : c.action === 'reject' ? 'bg-rose-50/50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-slate-800 text-[12px]">{i + 1}. {c.name} <span className="text-slate-500 font-normal ml-1">({c.role})</span></span>
+                          <span className="text-slate-400 font-medium text-[10px]">{new Date(c.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                        </div>
+                        <p className="text-slate-700 text-[13px]">{c.comment || "No comment provided."}</p>
+                        <div className="mt-1.5 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider">
+                          <span className={c.action === 'approve' ? 'text-emerald-600' : c.action === 'reject' ? 'text-rose-600' : 'text-amber-600'}>
+                            {c.action === 'approve' ? 'Approved' : c.action === 'reject' ? 'Declined' : c.action === 'return' ? 'Returned' : 'Responded'}
+                          </span>
+                          {sentToStr && (
+                            <span className="text-slate-500 normal-case tracking-normal font-medium text-[11px]">
+                              {c.action === 'return' ? 'Returned to: ' : 'Sent to: '}
+                              <span className="text-slate-700 font-semibold">{sentToStr}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </form>
         </div>
 
         {/* Approval Flow + Actions - fixed at bottom, OUTSIDE scrollable area */}
         <div className="flex-shrink-0 border-t border-slate-200 bg-slate-100">
           {/* Approval Flow */}
-          <div className="px-6 py-4 border-b border-slate-200/75 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[11px] font-bold shadow-sm ring-1 ring-brand-200 flex-shrink-0">
-                {avatarLetter}
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Next Step</p>
-                {isMultiReporting ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-slate-700">Forward to</span>
-                    <div className="w-[180px]">
-                      <CustomSelect
-                        name="selectedReportingTo"
-                        options={(Array.isArray(currentUser.reportingTo) ? currentUser.reportingTo : (currentUser.reportingTo ? [currentUser.reportingTo] : [])).map(n => ({ value: n, label: n }))}
-                        value={formData.selectedReportingTo}
-                        onChange={handleChange}
-                        placeholder="Select person"
-                        required={true}
-                        isMulti={true}
-                        menuPlacement="top"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-medium text-slate-700">Forward to</span>
-                    <span className="text-[13px] font-bold text-slate-900">{formData.selectedReportingTo || 'N/A'}</span>
-                  </div>
-                )}
+          <div className="px-6 py-4 border-b border-slate-200/75 grid grid-cols-1 md:grid-cols-2 gap-5 bg-white">
+            {(() => {
+              const formatLabel = (str) => {
+                if (!str) return '';
+                if (str.toLowerCase() === 'md') return 'MD';
+                return str.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+              };
+              return (
+                <>
+            <div className="space-y-2">
+              <label className="text-[13px] font-medium text-slate-700">
+                Reporting Role <span className="text-red-500 ml-0.5">*</span>
+              </label>
+              <div className="relative">
+                <CustomSelect
+                  name="selectedReportingRole"
+                  options={higherRoles.map(r => ({ value: r.name, label: formatLabel(r.name) }))}
+                  value={formData.selectedReportingRole}
+                  onChange={handleChange}
+                  placeholder="Select reporting role"
+                  required={true}
+                  menuPlacement="top"
+                />
               </div>
             </div>
-            <span className="text-[10px] font-bold px-2 py-1 rounded bg-white text-slate-600 uppercase tracking-wider border border-slate-200 shadow-sm flex-shrink-0 hidden sm:block">
-              {roleLabel}
-            </span>
+            <div className="space-y-2">
+              <label className="text-[13px] font-medium text-slate-700">
+                Reporting Person <span className="text-red-500 ml-0.5">*</span>
+              </label>
+              <div className="relative">
+                <CustomSelect
+                  name="selectedReportingTo"
+                  options={availablePersons.map(u => ({ value: u.name, label: formatLabel(u.name) }))}
+                  value={formData.selectedReportingTo}
+                  onChange={handleChange}
+                  placeholder="Select person(s)"
+                  required={true}
+                  isMulti={true}
+                  menuPlacement="top"
+                />
+              </div>
+            </div>
+              </>
+            );
+          })()}
           </div>
+
+          {validationError && (
+            <div className="px-6 pt-3">
+              <p className="text-rose-500 text-[13px] font-medium">{validationError}</p>
+            </div>
+          )}
 
           {/* Buttons */}
           <div className="px-6 py-4 flex items-center justify-end gap-3">

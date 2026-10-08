@@ -74,6 +74,7 @@ class AssetRequestCreate(BaseModel):
     description: str
     justification: str
     selectedReportingTo: Optional[Any] = None
+    selectedReportingRole: Optional[str] = None
     requestedBy: int
     attachments: Optional[list] = []
 
@@ -81,6 +82,7 @@ class ActionRequest(BaseModel):
     action: str
     remarks: Optional[str] = ""
     selectedApprovers: Optional[Any] = None
+    selectedReportingRole: Optional[str] = None
     userId: int  # The user making the action
 
 def format_user(user):
@@ -427,12 +429,13 @@ async def create_asset_request(request: AssetRequestCreate, db: Session = Depend
     if justification and isinstance(justification, str) and len(justification) > 0:
         justification = justification[0].upper() + justification[1:]
     
-    # Adjust initial status based on user role if needed
+    # Adjust initial status based on selected reporting role from form
     user = db.query(models.User).filter(models.User.id == request.requestedBy).first()
-    status = "Pending with Manager"
-    if user and user.reportingRole:
-        rr = user.reportingRole
+    rr = request.selectedReportingRole or (user.reportingRole if user else None)
+    if rr:
         status = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
+    else:
+        status = "Pending with Manager"
 
     new_request = models.AssetRequest(
         id=new_id,
@@ -504,6 +507,9 @@ async def process_request_action(request_id: str, payload: ActionRequest, db: Se
             returns = sum(1 for uid in forwardedToIds if votes.get(str(uid)) == 'return')
             
             def getNextAdvanceStatus():
+                if payload.selectedReportingRole:
+                    rr = payload.selectedReportingRole
+                    return f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
                 if user.reportingRole:
                     rr = user.reportingRole
                     return f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
@@ -533,7 +539,10 @@ async def process_request_action(request_id: str, payload: ActionRequest, db: Se
         if action == 'reject': newStatus = 'Rejected'
         elif action == 'return': newStatus = 'Returned'
         elif action == 'approve':
-            if user.reportingRole:
+            if payload.selectedReportingRole:
+                rr = payload.selectedReportingRole
+                newStatus = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
+            elif user.reportingRole:
                 rr = user.reportingRole
                 newStatus = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
             else:
@@ -558,6 +567,21 @@ async def process_request_action(request_id: str, payload: ActionRequest, db: Se
                     updatedForwardedTo = selectedApprovers if selectedApprovers else None
             else:
                 updatedForwardedTo = None
+    elif action == 'return':
+        if selectedApprovers and len(selectedApprovers) > 0:
+            for target_name in selectedApprovers:
+                target_user = next((u for u in all_users if u.name.lower().strip() == target_name.lower().strip()), None)
+                if target_user:
+                    if str(target_user.id) == str(r.requestedBy):
+                        newStatus = 'Returned'
+                    else:
+                        newStatus = f"Pending with {'MD' if target_user.role.lower() == 'md' else target_user.role.capitalize()}"
+                        if target_user.id in handledBy:
+                            handledBy.remove(target_user.id)
+                        if str(target_user.id) in votes:
+                            del votes[str(target_user.id)]
+            updatedForwardedTo = selectedApprovers
+            approverSelections[str(payload.userId)] = selectedApprovers
 
     finalComment = remarks.strip() if remarks and remarks.strip() else "No comments filled"
     commentsHistory.append({
@@ -587,6 +611,55 @@ async def process_request_action(request_id: str, payload: ActionRequest, db: Se
     db.commit()
     db.refresh(r)
     
+    return {c: getattr(r, c) for c in r.__table__.columns.keys()}
+
+@app.put("/api/asset-requests/{request_id}")
+async def update_asset_request(request_id: str, request: AssetRequestCreate, db: Session = Depends(get_db)):
+    r = db.query(models.AssetRequest).filter(models.AssetRequest.id == request_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+        
+    item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
+    if item and isinstance(item, str) and len(item) > 0:
+        item = item[0].upper() + item[1:]
+        
+    justification = request.justification
+    if justification and isinstance(justification, str) and len(justification) > 0:
+        justification = justification[0].upper() + justification[1:]
+        
+    user = db.query(models.User).filter(models.User.id == request.requestedBy).first()
+    rr = request.selectedReportingRole or (user.reportingRole if user else None)
+    if rr:
+        status = f"Pending with {'MD' if rr.lower() == 'md' else rr.capitalize()}"
+    else:
+        status = "Pending with Manager"
+        
+    r.item = item
+    r.category = request.assetType
+    r.justification = justification
+    r.forwardedTo = request.selectedReportingTo
+    r.routedTo = request.selectedReportingTo
+    r.status = status
+    r.attachments = request.attachments
+    r.handledBy = []
+    r.votes = {}
+    r.approverSelections = {}
+    
+    # Append a comment indicating the request was edited and resubmitted
+    comments = list(r.commentsHistory) if r.commentsHistory else []
+    comments.append({
+        "name": user.name if user else "Requester",
+        "role": user.role.capitalize() if user and user.role else "User",
+        "comment": "Request edited and resubmitted.",
+        "date": datetime.now().isoformat(),
+        "action": "edit"
+    })
+    r.commentsHistory = comments
+    r.updatedAt = datetime.now().isoformat()
+    
+    db.add(r)
+    db.commit()
+    db.refresh(r)
     return {c: getattr(r, c) for c in r.__table__.columns.keys()}
 
 @app.delete("/api/asset-requests/{request_id}")

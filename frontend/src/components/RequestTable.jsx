@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AppContext } from '../context/AppContext';
 import StatusBadge from './StatusBadge';
 import Button from './Button';
-import { Eye, Check, X, CornerUpLeft, MessageSquare, FileText, ChevronLeft, ChevronRight, Trash2, Clock, CheckCircle, XCircle, RotateCcw } from 'lucide-react';
+import { Eye, Check, X, CornerUpLeft, MessageSquare, FileText, ChevronLeft, ChevronRight, Trash2, Clock, CheckCircle, XCircle, RotateCcw, Edit2 } from 'lucide-react';
 
 const RequestTable = ({ requests, role, variant, onAction }) => {
   const { currentUser } = useContext(AppContext);
@@ -22,6 +22,47 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
       currency: 'INR',
       maximumFractionDigits: 0,
     }).format(amount);
+  };
+
+  const getDisplayStatus = (req) => {
+    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    let isCurrentlyPendingWithMe = false;
+    if (req.status === `Pending with ${roleName}`) {
+      if (!req.forwardedTo || req.forwardedTo.length === 0) {
+        isCurrentlyPendingWithMe = true;
+      } else {
+        isCurrentlyPendingWithMe = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
+          const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+          return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+        });
+      }
+      
+      // If I already voted, it's not pending for me anymore
+      if (req.handledBy && req.handledBy.includes(currentUser?.id)) {
+        isCurrentlyPendingWithMe = false;
+      }
+    }
+
+    if (isCurrentlyPendingWithMe) return req.status;
+
+    if (req.requestedBy !== currentUser?.id && req.handledBy && req.handledBy.includes(currentUser?.id)) {
+      const myLastAction = [...(req.commentsHistory || [])].reverse().find(c => c.name === currentUser?.name);
+      if (myLastAction) {
+        if (myLastAction.action === 'approve') return 'Approved';
+        if (myLastAction.action === 'reject') return 'Rejected';
+        if (myLastAction.action === 'return') return 'Returned';
+      }
+      return 'Handled'; // Fallback
+    }
+
+    if (req.commentsHistory && req.commentsHistory.length > 0) {
+      const lastAction = req.commentsHistory[req.commentsHistory.length - 1];
+      if (lastAction.action === 'return' && req.requestedBy === currentUser?.id) {
+        return 'Returned';
+      }
+    }
+    
+    return req.status;
   };
 
   const getActions = (req) => {
@@ -49,9 +90,11 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
 
     if (role === 'requester') {
       return (
-        <button onClick={() => onAction('delete', req)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
-          <Trash2 size={18} />
-        </button>
+        <div className="flex items-center justify-end space-x-1">
+          <button onClick={() => onAction('delete', req)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
+            <Trash2 size={18} />
+          </button>
+        </div>
       );
     }
 
@@ -190,9 +233,12 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                 className={`hover:bg-slate-50/50 transition-colors cursor-pointer hover:bg-slate-50`}
                 onClick={(e) => {
                   if (onAction) {
-                    // Don't trigger if they clicked an action button (icons)
                     if (!e.target.closest('button')) {
-                      onAction('viewDetailsModal', req);
+                      if (getDisplayStatus(req) === 'Returned' && req.requestedBy === currentUser?.id) {
+                        onAction('edit', req);
+                      } else {
+                        onAction('viewDetailsModal', req);
+                      }
                     }
                   }
                 }}
@@ -208,18 +254,7 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                     <td className="px-6 py-4 text-slate-700 font-medium max-w-[150px] truncate">{req.item}</td>
                     <td className="px-6 py-4 text-slate-600 max-w-[200px] truncate">{req.justification || 'No description provided'}</td>
                     <td className="px-6 py-4">
-                      {(() => {
-                         if (req.requestedBy === currentUser?.id) {
-                           return <StatusBadge status={req.status} />;
-                         }
-                         
-                         const vote = req.votes && req.votes[currentUser?.id];
-                         if (vote === 'approve') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><CheckCircle size={14} /> Approved</span>;
-                         if (vote === 'reject') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><XCircle size={14} /> Rejected</span>;
-                         if (vote === 'return') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><RotateCcw size={14} /> Returned</span>;
-                         
-                         return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600"><Clock size={14} /> Pending</span>;
-                      })()}
+                       <StatusBadge status={getDisplayStatus(req)} />
                     </td>
                   </>
                 ) : (
@@ -237,17 +272,7 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                       {req.item}
                     </td>
                     <td className="px-6 py-4">
-                      {(() => {
-                        if (req.requestedBy === currentUser?.id) {
-                          return <StatusBadge status={req.status} />;
-                        }
-                        const vote = req.votes && req.votes[currentUser?.id];
-                        if (vote === 'approve') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700"><CheckCircle size={14} /> Approved</span>;
-                        if (vote === 'reject') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><XCircle size={14} /> Rejected</span>;
-                        if (vote === 'return') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><RotateCcw size={14} /> Returned</span>;
-                        
-                        return <StatusBadge status={req.status} />;
-                      })()}
+                      <StatusBadge status={getDisplayStatus(req)} />
                     </td>
                     <td className="px-6 py-4 flex justify-end">
                       {getActions(req)}

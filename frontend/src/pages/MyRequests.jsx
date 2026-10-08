@@ -3,6 +3,7 @@ import { AppContext } from '../context/AppContext';
 import RequestTable from '../components/RequestTable';
 import StatCard from '../components/StatCard';
 import RequestDetailsModal from '../components/RequestDetailsModal';
+import NewRequestModal from '../components/NewRequestModal';
 import api from '../utils/api';
 import { Package, CheckCircle, Clock, RotateCcw, XCircle, ShieldAlert, Search, ChevronDown, Check, Download, CalendarDays } from 'lucide-react';
 import { RangeCalendar } from "@heroui/react";
@@ -15,6 +16,8 @@ const MyRequests = () => {
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editRequest, setEditRequest] = useState(null);
+  const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilters, setStatusFilters] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -68,6 +71,52 @@ const MyRequests = () => {
     return false;
   });
 
+  const getDisplayStatus = (r) => {
+    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    let isCurrentlyPendingWithMe = false;
+    if (r.status === `Pending with ${roleName}`) {
+      if (!r.forwardedTo || r.forwardedTo.length === 0) {
+        isCurrentlyPendingWithMe = true;
+      } else {
+        isCurrentlyPendingWithMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+          const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+          return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+        });
+      }
+    }
+
+    if (isCurrentlyPendingWithMe) return r.status || '';
+
+    if (r.requestedBy !== currentUser?.id && r.handledBy && r.handledBy.includes(currentUser?.id)) {
+      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c => c.name === currentUser?.name);
+      if (myLastAction) {
+        if (myLastAction.action === 'approve') return 'Approved';
+        if (myLastAction.action === 'reject') return 'Rejected';
+        if (myLastAction.action === 'return') return 'Returned';
+      }
+      return 'Handled';
+    }
+
+    if (r.commentsHistory && r.commentsHistory.length > 0) {
+      const lastAction = r.commentsHistory[r.commentsHistory.length - 1];
+      if (lastAction.action === 'return' && r.requestedBy === currentUser?.id) {
+        return 'Returned';
+      }
+    }
+    return r.status || '';
+  };
+
+  const isForwardedToMe = (r) => {
+    if (r.forwardedTo && r.forwardedTo.length > 0) {
+      return (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+        const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+        return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+      });
+    }
+    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    return r.status === `Pending with ${roleName}`;
+  };
+
   const stats = [
     {
       title: 'Total Request',
@@ -77,59 +126,111 @@ const MyRequests = () => {
     },
     {
       title: 'Approved Request',
-      // Count as "Approved" if it's fully Approved, OR if this specific user has approved/forwarded it
-      value: myRequests.filter(r => r.status === 'Approved' || (r.handledBy && r.handledBy.includes(currentUser?.id) && r.status !== 'Rejected' && r.status !== 'Returned')).length,
+      value: myRequests.filter(r => {
+        const ds = getDisplayStatus(r);
+        if (ds === 'Approved') return true;
+        if (r.handledBy && r.handledBy.includes(currentUser?.id) && ds !== 'Rejected' && ds !== 'Returned') {
+           // I handled it, and the request is not rejected/returned overall
+           return true;
+        }
+        return false;
+      }).length,
       icon: <CheckCircle size={24} />,
       colorClass: 'text-emerald-500',
     },
     {
       title: 'Pending Request',
       value: myRequests.filter(r => {
-        if (!r.status?.includes('Pending')) return false;
-        if (r.requestedBy === currentUser?.id) return true;
-        return !r.handledBy || !r.handledBy.includes(currentUser?.id);
+        const ds = getDisplayStatus(r);
+        if (!ds?.includes('Pending')) return false;
+        
+        const hasVoted = r.handledBy && r.handledBy.includes(currentUser?.id);
+        if (hasVoted) return false;
+        
+        if (isForwardedToMe(r)) return true;
+        
+        const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+        if (r.status === `Pending with ${roleName}` && (!r.forwardedTo || r.forwardedTo.length === 0)) return true;
+        
+        return false;
       }).length,
       icon: <Clock size={24} />,
       colorClass: 'text-blue-500',
     },
     {
       title: 'Rejected',
-      value: myRequests.filter(r => r.status === 'Rejected').length,
+      value: myRequests.filter(r => getDisplayStatus(r) === 'Rejected').length,
       icon: <XCircle size={24} />,
       colorClass: 'text-red-600',
     },
   ];
 
-  const handleAction = async (action, req, remarks, selectedApprovers) => {
-    if (action === 'viewDetailsModal') {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
+    if (action === 'viewDetailsModal' || action === 'view') {
       setSelectedRequest(req);
       setIsModalOpen(true);
+    } else if (action === 'edit') {
+      setEditRequest(req);
+      setIsNewRequestModalOpen(true);
     } else if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
           action: action,
           remarks: remarks,
           selectedApprovers: selectedApprovers,
+          selectedReportingRole: selectedReportingRole,
           userId: currentUser?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
       } catch (error) {
         console.error("Action failed", error);
       }
+    } else if (action === 'delete') {
+      try {
+        await api.delete(`/asset-requests/${req.id}`);
+        setRequests(requests.filter(r => r.id !== req.id));
+      } catch (error) {
+        console.error('Failed to delete request:', error);
+      }
+    }
+  };
+
+  const handleAddRequest = async (data) => {
+    try {
+      const selectedPerson = data.selectedReportingTo;
+      const forwardTo = selectedPerson
+        ? (Array.isArray(selectedPerson) ? selectedPerson : [selectedPerson])
+        : (Array.isArray(currentUser?.reportingTo) ? currentUser.reportingTo : currentUser?.reportingTo ? [currentUser.reportingTo] : []);
+
+      const payload = {
+        assetType: data.assetType,
+        otherAssetType: data.otherAssetType || '',
+        description: data.description,
+        justification: data.justification,
+        selectedReportingTo: forwardTo,
+        selectedReportingRole: data.selectedReportingRole || '',
+        requestedBy: currentUser?.id || 1,
+        attachments: data.attachments || []
+      };
+      
+      if (editRequest) {
+        const response = await api.put(`/asset-requests/${editRequest.id}`, payload);
+        setRequests(requests.map(r => r.id === editRequest.id ? response.data : r));
+      } else {
+        const response = await api.post('/asset-requests', payload);
+        setRequests([response.data, ...requests]);
+      }
+      setEditRequest(null);
+      setIsNewRequestModalOpen(false);
+    } catch (error) {
+      console.error('Failed to update asset request:', error);
+      alert('Failed to update request. Please try again.');
     }
   };
 
   const filteredRequests = myRequests.filter(r => {
     const displayStatus = (() => {
-      let status = r.status;
-      if (r.requestedBy !== currentUser?.id) {
-        const vote = r.votes && r.votes[currentUser?.id];
-        if (vote === 'approve') status = 'Approved';
-        else if (vote === 'reject') status = 'Rejected';
-        else if (vote === 'return') status = 'Returned';
-        else status = 'Pending';
-      }
-      return status;
+      return getDisplayStatus(r);
     })();
 
     const matchesSearch = !searchQuery ? true : (() => {
@@ -188,13 +289,6 @@ const MyRequests = () => {
       const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
       
       let displayStatus = r.status;
-      if (r.requestedBy !== currentUser?.id) {
-        const vote = r.votes && r.votes[currentUser?.id];
-        if (vote === 'approve') displayStatus = 'Approved';
-        else if (vote === 'reject') displayStatus = 'Rejected';
-        else if (vote === 'return') displayStatus = 'Returned';
-        else displayStatus = 'Pending';
-      }
 
       return [
         escapeCSV(r.id),
@@ -403,6 +497,16 @@ const MyRequests = () => {
         onClose={() => setIsModalOpen(false)}
         request={selectedRequest}
         onAction={handleAction}
+      />
+      
+      <NewRequestModal 
+        isOpen={isNewRequestModalOpen} 
+        onClose={() => {
+          setIsNewRequestModalOpen(false);
+          setEditRequest(null);
+        }} 
+        onAdd={handleAddRequest}
+        editRequest={editRequest}
       />
     </div>
   );
