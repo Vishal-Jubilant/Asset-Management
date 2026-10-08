@@ -541,13 +541,24 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   }
                 });
               }
+              const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+              const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : -1;
+
               const involvedOptions = [...involvedNames]
                 .map(name => {
                   const u = users.find(u => u.name?.toLowerCase().trim() === name?.toLowerCase().trim());
-                  return u && u.name !== currentUser?.name ? {
+                  if (!u || u.name === currentUser?.name) return null;
+
+                  const uRoleObj = roles.find(r => r.name?.toLowerCase() === u.role?.toLowerCase());
+                  const uLevel = uRoleObj ? uRoleObj.level : Infinity;
+
+                  // Only allow returning to users in roles strictly below the current user
+                  if (currentUserLevel !== -1 && uLevel <= currentUserLevel) return null;
+
+                  return {
                     value: u.name,
                     label: `${u.name} • ${u.role === 'md' ? 'MD' : (u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : '')}`
-                  } : null;
+                  };
                 })
                 .filter(Boolean)
                 .reverse();
