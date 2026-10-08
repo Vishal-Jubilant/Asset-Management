@@ -585,8 +585,30 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                       return <span className="text-sm font-semibold text-slate-700">You are providing final approval.</span>;
                     }
 
-                    const higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
-                    const availablePersons = users.filter(u => u.role === selectedReportingRole);
+                    // Filter higher roles and available persons based on previous involvement
+                    let higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
+                    let availablePersons = users.filter(u => u.role === selectedReportingRole);
+
+                    const previousHigherHandlers = new Set();
+                    if (request.commentsHistory && request.commentsHistory.length > 0) {
+                      request.commentsHistory.forEach(c => {
+                        if (!c || !c.name) return;
+                        const userObj = users.find(u => u.name === c.name);
+                        if (userObj) {
+                          const userRoleObj = roles.find(r => r.name?.toLowerCase() === userObj.role?.toLowerCase());
+                          if (userRoleObj && userRoleObj.level < currentUserLevel) {
+                            previousHigherHandlers.add(userObj.name);
+                          }
+                        }
+                      });
+                    }
+
+                    if (previousHigherHandlers.size > 0) {
+                      const restrictedUsers = users.filter(u => previousHigherHandlers.has(u.name));
+                      const restrictedRolesSet = new Set(restrictedUsers.map(u => u.role));
+                      higherRoles = roles.filter(r => restrictedRolesSet.has(r.name));
+                      availablePersons = restrictedUsers.filter(u => u.role === selectedReportingRole);
+                    }
 
                     const formatLabel = (str) => {
                       if (!str) return '';
