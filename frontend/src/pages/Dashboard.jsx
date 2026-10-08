@@ -90,6 +90,11 @@ const Dashboard = () => {
             return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
           });
         }
+        
+        // If I already voted, it's not pending for me anymore
+        if (r.handledBy && r.handledBy.includes(currentUser?.id)) {
+          isCurrentlyPendingWithMe = false;
+        }
       }
 
       if (isCurrentlyPendingWithMe) return r.status || '';
