@@ -506,14 +506,11 @@ const Dashboard = () => {
                               <p className="text-xs font-bold text-slate-800">{req.id}</p>
                               <p className="text-sm text-slate-600 mt-1 leading-snug">
                                 {(() => {
-                                  const lastAction = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].action : null;
-                                  const isReturned = req.status === 'Returned' || lastAction === 'return';
+                                  const hasReturnOrEdit = req.commentsHistory && req.commentsHistory.some(c => c.action === 'edit' || c.action === 'return');
+                                  const lastActor = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].name : getRequesterName(req.requestedBy);
                                   
-                                  if (lastAction === 'edit') {
-                                    return <>Updated Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
-                                  } else if (isReturned) {
-                                    const returnerName = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].name : getRequesterName(req.requestedBy);
-                                    return <>Returned Request from <span className="font-semibold text-brand-600 capitalize">{returnerName}</span></>;
+                                  if (hasReturnOrEdit) {
+                                    return <>Updated Request from <span className="font-semibold text-brand-600 capitalize">{lastActor}</span></>;
                                   } else {
                                     return <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
                                   }
