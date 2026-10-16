@@ -10,6 +10,7 @@ class User(Base):
     mobile = Column(String)
     role = Column(String)
     department = Column(String)
+    departmentRole = Column(String, nullable=True)
     password = Column(String)
     status = Column(String)
     firstLogin = Column(Boolean, default=True)
@@ -25,6 +26,12 @@ class Role(Base):
 
 class Category(Base):
     __tablename__ = "categories"
+    id = Column(Integer, primary_key=True, index=True)
+    value = Column(String, unique=True)
+    label = Column(String)
+
+class Department(Base):
+    __tablename__ = "departments"
     id = Column(Integer, primary_key=True, index=True)
     value = Column(String, unique=True)
     label = Column(String)
@@ -45,5 +52,7 @@ class AssetRequest(Base):
     approverSelections = Column(JSON, default=dict)
     commentsHistory = Column(JSON, default=list)
     attachments = Column(JSON, default=list)
+    approvalSequence = Column(JSON, nullable=True)
+    currentStep = Column(Integer, default=1)
     createdAt = Column(String)
     updatedAt = Column(String)

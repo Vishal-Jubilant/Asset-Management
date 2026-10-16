@@ -10,8 +10,27 @@ const UserTable = ({ users, onEdit, onDelete }) => {
     setCurrentPage(1);
   }, [users.length]);
 
-  const totalPages = Math.max(1, Math.ceil(users.length / itemsPerPage));
-  const paginatedUsers = users.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const getUserRank = (u) => {
+    if (!u) return 99;
+    const role = (u.role || '').toLowerCase().trim();
+    const deptRole = (u.departmentRole || '').toLowerCase().trim();
+    const empCode = (u.empCode || '').toLowerCase().trim();
+    const mail = (u.mailid || '').toLowerCase().trim();
+    const name = (u.name || '').toLowerCase().trim();
+    if (role === 'admin' || empCode === 'admin' || mail === 'admin@system.local' || name === 'administrator') return 0;
+    if (role === 'md' || deptRole === 'md' || empCode === 'md' || mail === 'md@system.local' || name === 'managing director') return 1;
+    return 2;
+  };
+
+  const sortedUsers = [...users].sort((a, b) => {
+    const rankA = getUserRank(a);
+    const rankB = getUserRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+    return (a.id || 0) - (b.id || 0);
+  });
+
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / itemsPerPage));
+  const paginatedUsers = sortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
     <div className="bg-white border border-slate-200/60 rounded-2xl shadow-[0_4px_24px_rgb(0,0,0,0.03)] overflow-hidden flex flex-col">
@@ -24,12 +43,18 @@ const UserTable = ({ users, onEdit, onDelete }) => {
               <th className="px-6 py-4 font-medium">Mail ID</th>
               <th className="px-6 py-4 font-medium">Emp Code</th>
               <th className="px-6 py-4 font-medium">Mobile</th>
+              <th className="px-6 py-4 font-medium">Department</th>
               <th className="px-6 py-4 font-medium">Role</th>
               <th className="px-6 py-4 font-medium text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {paginatedUsers.map((user, index) => (
+            {paginatedUsers.map((user, index) => {
+              const isAdmin = getUserRank(user) === 0;
+              const isMD = getUserRank(user) === 1;
+              const isProtected = isAdmin;
+
+              return (
               <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
                 <td className="px-6 py-4 text-slate-500 font-medium w-16">
                   {((currentPage - 1) * itemsPerPage) + index + 1}
@@ -51,24 +76,55 @@ const UserTable = ({ users, onEdit, onDelete }) => {
                 <td className="px-6 py-4 text-slate-600">
                   {user.mobile}
                 </td>
+                <td className="px-6 py-4 text-slate-700 font-medium">
+                  {user.department ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                      {user.department}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 italic">—</span>
+                  )}
+                </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 uppercase tracking-widest border border-slate-200">
-                    {user.role}
+                  <span 
+                    className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border shadow-xs ${
+                      isAdmin
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : isMD
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : (user.role?.toLowerCase() === 'head' || user.departmentRole?.toLowerCase() === 'head')
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}
+                    title={user.departmentTitle || (user.department ? `${user.department} Department ${user.role || user.departmentRole || 'User'}` : (user.role || 'User'))}
+                  >
+                    {isMD ? 'MD' : (user.role || user.departmentRole || 'User')}
                   </span>
                 </td>
                 <td className="px-6 py-4 flex justify-end gap-2 text-slate-400">
                   <button onClick={() => onEdit && onEdit(user)} className="p-1.5 hover:text-brand-600 hover:bg-brand-50 rounded-md transition-colors" title="Edit">
                     <Edit size={16} />
                   </button>
-                  <button onClick={() => onDelete && onDelete(user.id)} className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
-                    <Trash2 size={16} />
-                  </button>
+                  {isProtected ? (
+                    <button 
+                      disabled 
+                      className="p-1.5 text-slate-300 cursor-not-allowed rounded-md opacity-35" 
+                      title="Admin account cannot be deleted"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  ) : (
+                    <button onClick={() => onDelete && onDelete(user.id)} className="p-1.5 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </td>
               </tr>
-            ))}
+            );
+            })}
             {paginatedUsers.length === 0 && (
               <tr>
-                <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
+                <td colSpan="8" className="px-6 py-12 text-center text-slate-500">
                   No users found.
                 </td>
               </tr>

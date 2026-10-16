@@ -1,7 +1,8 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
-  User, Hash, Monitor, ChevronDown, ChevronRight, MessageSquare, AlertCircle, Paperclip, Download
+  User, Hash, Monitor, ChevronDown, ChevronRight, MessageSquare, AlertCircle, Paperclip, Download, Shield,
+  ArrowRight
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
@@ -26,6 +27,27 @@ const Badge = ({ children, variant = 'default', className = '' }) => {
       {children}
     </span>
   );
+};
+
+const formatReturnRecipient = (recipient, users) => {
+  const recipientName = typeof recipient === 'object'
+    ? recipient.value || recipient.label || ''
+    : String(recipient || '');
+  const recipientUser = users.find(user => user.name?.toLowerCase().trim() === recipientName.toLowerCase().trim());
+
+  if (!recipientUser) return recipientName;
+
+  const roles = [recipientUser.role, recipientUser.departmentRole]
+    .filter(Boolean)
+    .map(role => role.toLowerCase());
+  const roleLabel = roles.includes('md') ? 'MD' :
+                    roles.includes('admin') ? 'Admin' :
+                    roles.includes('head') ? 'Head' : 'User';
+  const departmentRole = roleLabel === 'MD'
+    ? 'MD'
+    : `${recipientUser.department ? `${recipientUser.department} ` : ''}${roleLabel}`;
+
+  return `${recipientUser.name} - ${departmentRole}`;
 };
 
 const TimelineNode = ({ status }) => {
@@ -66,6 +88,7 @@ const TimelineNode = ({ status }) => {
 const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
   // Determine if this group is fully approved. If so, start collapsed.
   const isFullyApproved = group.comments.every(c => c.voteAction === 'approve');
+  const headingRole = /\bMD$/i.test(group.role || '') ? 'MD' : group.role;
   const [isExpanded, setIsExpanded] = useState(!isFullyApproved);
 
   return (
@@ -86,7 +109,7 @@ const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
             ) : (
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
             )}
-            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{stepNumber}. {group.role} LEVEL</h4>
+            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{stepNumber}. {headingRole}</h4>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
@@ -151,30 +174,55 @@ const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
                     )}
                   </div>
 
-                  <div className="flex items-end justify-between text-[11px] text-slate-500">
-                    <div className="space-y-1">
+                  {c.voteAction === 'return' ? (
+                    <div className="space-y-1 text-[11px] text-slate-500">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 min-h-[20px]">
+                        {c.receivedDate && (
+                          <div className="flex items-center gap-1.5">
+                            <span>Received:</span>
+                            <span className="font-medium text-slate-700">{formatDateTime(c.receivedDate)}</span>
+                          </div>
+                        )}
+                        {c.date && (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span>Returned:</span>
+                            <span className="font-medium text-slate-700">{formatDateTime(c.date)}</span>
+                          </div>
+                        )}
+                      </div>
                       {c.sentToStr && (
                         <div className="flex items-center gap-1.5 min-h-[20px]">
-                          <span className="font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{c.voteAction === 'return' ? 'Returned to:' : 'Sent to:'}</span>
+                          <span className="font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">Returned to:</span>
                           <span>{c.sentToStr}</span>
                         </div>
                       )}
-                      {c.receivedDate && (
-                        <div className="flex items-center gap-1.5 min-h-[20px]">
-                          <span>Received:</span>
-                          <span className="font-medium text-slate-700">{formatDateTime(c.receivedDate)}</span>
-                        </div>
-                      )}
                     </div>
-                    <div className="text-right space-y-1">
-                      {c.date && (
-                        <div className="flex items-center justify-end gap-1.5 min-h-[20px]">
-                          <span>{c.voteAction === 'approve' ? 'Approved:' : c.voteAction === 'reject' ? 'Declined:' : c.voteAction === 'return' ? 'Returned:' : 'Responded:'}</span>
-                          <span className="font-medium text-slate-700">{formatDateTime(c.date)}</span>
-                        </div>
-                      )}
+                  ) : (
+                    <div className="flex items-end justify-between text-[11px] text-slate-500">
+                      <div className="space-y-1">
+                        {c.sentToStr && (
+                          <div className="flex items-center gap-1.5 min-h-[20px]">
+                            <span className="font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">Sent to:</span>
+                            <span>{c.sentToStr}</span>
+                          </div>
+                        )}
+                        {c.receivedDate && (
+                          <div className="flex items-center gap-1.5 min-h-[20px]">
+                            <span>Received:</span>
+                            <span className="font-medium text-slate-700">{formatDateTime(c.receivedDate)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right space-y-1">
+                        {c.date && (
+                          <div className="flex items-center justify-end gap-1.5 min-h-[20px]">
+                            <span>{c.voteAction === 'approve' ? 'Approved:' : c.voteAction === 'reject' ? 'Declined:' : 'Responded:'}</span>
+                            <span className="font-medium text-slate-700">{formatDateTime(c.date)}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
@@ -221,12 +269,21 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   if (!isOpen || !request) return null;
 
   const requester = users.find(u => u.id === request.requestedBy);
+  const requesterRole = requester?.role?.toLowerCase() === 'md' || requester?.departmentRole?.toLowerCase() === 'md'
+    ? 'MD'
+    : requester?.role?.toLowerCase() === 'head' || requester?.departmentRole?.toLowerCase() === 'head'
+      ? 'Head'
+      : 'User';
+  const requesterDepartmentRole = `${requester?.department ? `${requester.department} ` : ''}${requesterRole}`;
   const roleName = requester?.role === 'md' ? 'MD' : (requester?.role ? requester.role.charAt(0).toUpperCase() + requester.role.slice(1).toLowerCase() : 'Unknown');
   const myRole = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+  const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md' || myRole === 'MD';
   
-  const isHandled = request.handledBy && request.handledBy.includes(currentUser?.id);
-  const isRequester = request.requestedBy === currentUser?.id;
-  
+  const currentUserId = String(currentUser?.id ?? '');
+  const isHandled = (request.handledBy || []).some(id => String(id) === currentUserId);
+  const isRequester = String(request.requestedBy) === currentUserId;
+  const hasVoted = Boolean(request.votes?.[currentUserId]);
+
   const isForwardedToMe = (() => {
     if (request.forwardedTo && request.forwardedTo.length > 0) {
       return (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).some(n => {
@@ -238,13 +295,43 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   })();
 
   const isApprover = (() => {
-    if (isForwardedToMe) return true;
-    if (!request.status.includes('Pending')) return false;
+    if (!request.status || !request.status.includes('Pending')) return false;
+    if (isRequester) return false;
+    if (isHandled || hasVoted) return false;
+    // 1. If approval sequence exists, authorization strictly belongs to active step
+    if (request.approvalSequence && request.approvalSequence.length > 0) {
+      const curStepIdx = (request.currentStep || 1) - 1;
+      const curStep = request.approvalSequence[curStepIdx];
+      if (!curStep) return false;
+
+      // If this step is already completed
+      if (curStep.status === 'approved' || curStep.status === 'rejected') return false;
+
+      // If this step is for MD and current user is MD
+      if (curStep.role?.toLowerCase() === 'md' && isMD) {
+        return true;
+      }
+
+      // Check if current user's name matches any approver for this active step
+      const stepApprovers = curStep.approvers || [];
+      return stepApprovers.some(n => {
+        const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+        return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+      });
+    }
+
+    // 2. If forwardedTo is explicitly specified
+    if (request.forwardedTo && (Array.isArray(request.forwardedTo) ? request.forwardedTo.length > 0 : true)) {
+      if (isForwardedToMe) return true;
+      if (request.status === 'Pending with MD' && isMD) return true;
+      return false; // Directed to someone else
+    }
+
+    // 3. Fallback only if no sequence and no forwardedTo (legacy fallback)
     return request.status === `Pending with ${myRole}`;
   })();
 
-  const hasVoted = request.votes && !!request.votes[currentUser?.id];
-  const showActions = !hasVoted && !isRequester && isApprover;
+  const showActions = isApprover && !hasVoted && !isHandled && !isRequester;
 
   const handleActionClick = (actionStr) => {
     if (actionStr === 'return') {
@@ -292,22 +379,56 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
 
   // Generate timeline groups
   let groupedComments = [];
-  if (request.commentsHistory?.length > 0 || request.status.includes('Pending')) {
+  if (request.commentsHistory?.length > 0 || request.status.includes('Pending') || request.status === 'Returned') {
     let allComments = request.commentsHistory ? [...request.commentsHistory] : [];
-    
-    if (request.status.includes('Pending') && request.forwardedTo) {
+    const approvalSteps = request.approvalSequence || [];
+
+    const resolveCommentStep = (comment) => {
+      const stepByNumber = approvalSteps.find((step, index) =>
+        Number(step.step || index + 1) === Number(comment.step)
+      );
+      if (stepByNumber) return stepByNumber;
+
+      const commentName = (comment.name || '').toLowerCase().trim();
+      return approvalSteps.find(step => (step.approvers || []).some(approver => {
+        const approverName = typeof approver === 'object'
+          ? approver.value || approver.label || ''
+          : String(approver);
+        return approverName.toLowerCase().trim() === commentName;
+      }));
+    };
+
+    const hasPendingRecipient = request.status.includes('Pending') || request.status === 'Returned';
+    if (hasPendingRecipient && request.forwardedTo) {
       const lastCommentDate = allComments.length > 0 ? allComments[allComments.length - 1].date : (request.createdAt || request.date);
-      
+
+      const currentStepNumber = Number(request.currentStep || 1);
+      const curStepObj = approvalSteps.find((step, index) =>
+        Number(step.step || index + 1) === currentStepNumber
+      );
+
       (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).forEach(nameObj => {
         const name = typeof nameObj === 'object' ? nameObj.value || nameObj.label : String(nameObj);
-        const u = users.find(user => user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim());
+        const stepDept = (curStepObj?.department || '').toLowerCase().trim();
+        const u = users.find(user => 
+          user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim() &&
+          (user.role?.toLowerCase() === 'head' || user.departmentRole?.toLowerCase() === 'head' || user.role?.toLowerCase() === 'md') &&
+          (!stepDept || (user.department || '').toLowerCase().trim() === stepDept)
+        ) || users.find(user => 
+          user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim() &&
+          (user.role?.toLowerCase() === 'head' || user.departmentRole?.toLowerCase() === 'head' || user.role?.toLowerCase() === 'md')
+        ) || users.find(user => user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim());
         
         if (u) {
           const hasVoted = request.votes && request.votes[u.id];
           if (!hasVoted) {
             allComments.push({
               name: u.name,
-              role: u.role === 'md' ? 'MD' : (u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1).toLowerCase() : ''),
+              role: curStepObj?.role?.toLowerCase() === 'md'
+                ? 'MD'
+                : `${curStepObj?.department || u.department || ''} ${curStepObj?.role || 'Head'}`.trim(),
+              department: curStepObj?.department || u.department || '',
+              step: curStepObj?.step || currentStepNumber,
               comment: 'Pending review...',
               date: null,
               action: 'pending',
@@ -319,6 +440,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       });
     }
 
+    const groupsByStep = new Map();
     [...allComments].reverse().forEach((c, idx) => {
       const originalIdx = allComments.length - 1 - idx;
       let receivedDate = c.receivedDateOverride || request.createdAt || request.date; // Fallback to request creation date
@@ -332,10 +454,27 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         }
       }
       
-      const u = users.find(user => user.name === c.name);
+      const workflowStep = resolveCommentStep(c);
+      const cName = (c.name || '').toLowerCase().trim();
+      const u = users.find(user =>
+        user.name?.toLowerCase().trim() === cName &&
+        (!workflowStep?.department || (user.department || '').toLowerCase().trim() === workflowStep.department.toLowerCase().trim())
+      ) || users.find(user => user.name?.toLowerCase().trim() === cName);
+      const roleText = [workflowStep?.role, c.role, u?.role, u?.departmentRole].filter(Boolean).join(' ').toLowerCase();
+      const isMDApprover = workflowStep?.role?.toLowerCase() === 'md' ||
+        u?.role?.toLowerCase() === 'md' || u?.departmentRole?.toLowerCase() === 'md' || /\bmd\b/.test(roleText);
+      const isHeadApprover = workflowStep?.role?.toLowerCase() === 'head' ||
+        u?.role?.toLowerCase() === 'head' || u?.departmentRole?.toLowerCase() === 'head' || /\bhead\b/.test(roleText);
+      if (!isMDApprover && !isHeadApprover && !workflowStep) return;
+
+      const department = workflowStep?.department || u?.department || c.department || '';
+      const stepRole = workflowStep?.role || (isMDApprover ? 'MD' : isHeadApprover ? 'Head' : u?.role || 'User');
+      const historyRole = isMDApprover ? 'MD' : `${department ? `${department} ` : ''}${stepRole}`;
       const voteAction = c.action || (u ? request.votes?.[u.id] : undefined);
       const sentToObj = u && request.approverSelections ? request.approverSelections[u.id] : undefined;
-      const sentToStr = sentToObj ? (Array.isArray(sentToObj) ? sentToObj : [sentToObj]).map(name => {
+      const sentToStr = voteAction === 'return'
+        ? (c.sentToStr ? formatReturnRecipient(c.sentToStr, users) : '')
+        : sentToObj ? (Array.isArray(sentToObj) ? sentToObj : [sentToObj]).map(name => {
         const targetUser = users.find(user => user.name === name);
         if (targetUser) {
           const roleStr = targetUser.role === 'md' ? 'MD' : (targetUser.role ? targetUser.role.charAt(0).toUpperCase() + targetUser.role.slice(1).toLowerCase() : '');
@@ -344,19 +483,36 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         return name;
       }).join(', ') : '';
       
-      const enrichedComment = { ...c, originalIdx, receivedDate, voteAction, sentToStr };
-      
-      const lastGroup = groupedComments[groupedComments.length - 1];
-      if (lastGroup && lastGroup.role === c.role) {
-        lastGroup.comments.push(enrichedComment);
-      } else {
-        groupedComments.push({
-          role: c.role,
-          comments: [enrichedComment]
-        });
+      const enrichedComment = { ...c, role: historyRole, originalIdx, receivedDate, voteAction, sentToStr };
+      const stepNumber = workflowStep
+        ? Number(workflowStep.step || approvalSteps.indexOf(workflowStep) + 1)
+        : Number(c.step) || groupedComments.length + 1;
+      const groupKey = workflowStep ? `step-${stepNumber}` : `legacy-${historyRole}-${stepNumber}`;
+      let group = groupsByStep.get(groupKey);
+      if (!group) {
+        group = { key: groupKey, role: historyRole, stepNumber, comments: [] };
+        groupsByStep.set(groupKey, group);
+        groupedComments.push(group);
       }
+      group.comments.push(enrichedComment);
     });
   }
+
+  const latestWorkflowAction = [...(request.commentsHistory || [])]
+    .reverse()
+    .find(comment => ['approve', 'reject', 'return'].includes(comment.action));
+  const isReturnInProgress = latestWorkflowAction?.action === 'return' &&
+    !['Approved', 'Rejected'].includes(request.status);
+  const returnTargetName = (latestWorkflowAction?.sentToStr || '').toLowerCase().trim();
+  const returnsToEarlierApprover = latestWorkflowAction?.action === 'return' &&
+    (request.approvalSequence || []).some(step =>
+      Number(step.step) < Number(latestWorkflowAction.step) &&
+      (step.approvers || []).some(approver => {
+        const approverName = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+        return approverName.toLowerCase().trim() === returnTargetName;
+      })
+    );
+  const isReturnToRequester = latestWorkflowAction?.action === 'return' && !returnsToEarlierApprover;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-200">
@@ -401,7 +557,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               <div className="min-w-0 flex-1">
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Requested By</span>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[13.5px] font-bold text-slate-800 truncate max-w-[100px] sm:max-w-[120px]">{requester?.name || request.requestedBy}</span>
+                  <span className="text-[13.5px] font-bold text-slate-800 break-words">{requester?.name || request.requestedBy}</span>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase tracking-wider flex-shrink-0">
                      {roleName}
                   </span>
@@ -494,16 +650,219 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             </div>
           )}
 
+          {/* Approval Sequence Workflow Card */}
+          {request.approvalSequence && request.approvalSequence.length > 0 && (
+            <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-[12px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield size={14} className="text-blue-600" />
+                  Approval Workflow Sequence
+                </h3>
+                <span
+                  className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
+                    request.status === 'Approved'
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                      : request.status === 'Rejected'
+                      ? 'text-rose-700 bg-rose-50 border-rose-200'
+                      : request.status === 'Returned'
+                      ? 'text-amber-700 bg-amber-50 border-amber-200'
+                      : 'text-slate-500 bg-white border-slate-200'
+                  }`}
+                >
+                  Step {request.status === 'Approved' ? request.approvalSequence.length : (request.currentStep || 1)} of {request.approvalSequence.length}
+                  {request.status === 'Returned' ? ' • Returned' : request.status === 'Approved' ? ' • Approved' : request.status === 'Rejected' ? ' • Rejected' : ''}
+                </span>
+              </div>
+
+              <div className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+                <React.Fragment key="requester">
+                  <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] px-1">
+                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center bg-white border-2 border-slate-300 text-slate-500">
+                      <User className="w-5 h-5" />
+                    </div>
+                    <div className="mt-2.5 flex flex-col items-center w-full">
+                      <span className="text-[12.5px] font-bold text-slate-800 block text-center leading-tight break-words w-full">
+                        {requester?.name || 'Requester'}
+                      </span>
+                      <span className="text-[11px] text-slate-500 block text-center leading-snug break-words w-full mt-1">
+                        {requesterDepartmentRole}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex-1 flex items-center justify-center min-w-[28px] sm:min-w-[48px] pt-4 sm:pt-4.5 px-1">
+                    <div className="w-full flex items-center justify-center">
+                      <span className="h-[2px] w-full rounded-l-full bg-slate-200" />
+                      <ArrowRight className="w-4 h-4 shrink-0 -ml-1 text-slate-300" strokeWidth={2.5} />
+                    </div>
+                  </div>
+                </React.Fragment>
+                {request.approvalSequence.map((step, sIdx) => {
+                  const stepNumber = sIdx + 1;
+                  const currentStepNum = request.currentStep || 1;
+                  const isOverallApproved = request.status === 'Approved';
+                  const isOverallRejected = request.status === 'Rejected';
+                  const isOverallReturned = request.status === 'Returned';
+
+                  const stepApproverNames = (step.approvers || []).map(a =>
+                    (typeof a === 'object' ? a.value || a.label : String(a)).toLowerCase().trim()
+                  );
+
+                  // Extract the latest action specifically associated with this step or its approvers
+                  const stepComments = (request.commentsHistory || []).filter(c => {
+                    if (c.step && c.step === stepNumber) return true;
+                    const cName = (c.name || '').toLowerCase().trim();
+                    return stepApproverNames.includes(cName);
+                  });
+                  const latestStepComment = stepComments.length > 0 ? stepComments[stepComments.length - 1] : null;
+
+                  // Keep a return visible on its originating step when routing back to an earlier step.
+                  const isFutureStep = stepNumber > currentStepNum && !isOverallApproved && latestStepComment?.action !== 'return';
+                  const isCurrent = !isFutureStep &&
+                    stepNumber === currentStepNum &&
+                    request.status?.includes('Pending');
+                  const isLatestReturnedStep = request.status === 'Returned' &&
+                    latestWorkflowAction?.action === 'return' &&
+                    Number(latestWorkflowAction.step) === stepNumber;
+                  const isReturnedToEarlierStep = request.status?.includes('Pending') &&
+                    latestWorkflowAction?.action === 'return' &&
+                    latestWorkflowAction.step != null &&
+                    Number(latestWorkflowAction.step) > currentStepNum;
+
+                  // Determine step status
+                  const isRejected = !isLatestReturnedStep && !isCurrent && !isFutureStep && (
+                    step.status === 'rejected' ||
+                    latestStepComment?.action === 'reject' ||
+                    (isOverallRejected && stepNumber === currentStepNum)
+                  );
+
+                  const isReturned = !isCurrent && !isFutureStep && !isRejected && (
+                    isLatestReturnedStep ||
+                    step.status === 'returned' ||
+                    latestStepComment?.action === 'return' ||
+                    (isOverallReturned && stepNumber === currentStepNum)
+                  );
+
+                  const isCompleted = !(isReturnInProgress && (isReturnToRequester || stepNumber >= currentStepNum)) &&
+                    !isCurrent && !isFutureStep && !isRejected && !isReturned && (
+                    step.status === 'approved' ||
+                    isOverallApproved ||
+                    (latestStepComment?.action === 'approve') ||
+                    (stepNumber < currentStepNum && !isOverallRejected && !isOverallReturned)
+                  );
+                  const roleText = (() => {
+                    const isLastStep = sIdx === request.approvalSequence.length - 1;
+                    const baseRole = step.role === 'MD' 
+                      ? 'Managing Director' 
+                      : `${step.department ? `${step.department} ` : 'Department '}${step.role || 'Head'}`;
+                    return isLastStep ? `${baseRole} (Final)` : baseRole;
+                  })();
+
+                  return (
+                    <React.Fragment key={sIdx}>
+                      {/* Step Item Column */}
+                      <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] group px-1">
+                        {/* Circle Shape Step Indicator */}
+                        <div className="relative flex items-center justify-center">
+                          <div
+                            className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-200 ${
+                              isCompleted
+                                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 ring-4 ring-emerald-100'
+                                : isRejected
+                                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/25 ring-4 ring-rose-100'
+                                : isReturned
+                                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-4 ring-amber-100'
+                                : isCurrent
+                                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 ring-4 ring-blue-100 scale-105'
+                                : 'bg-white border-2 border-slate-300 text-slate-400 group-hover:border-slate-400'
+                            }`}
+                          >
+                            {isCompleted ? (
+                              <Check className="w-5 h-5 text-white" strokeWidth={3} />
+                            ) : isRejected ? (
+                              <X className="w-5 h-5 text-white" strokeWidth={3} />
+                            ) : isReturned ? (
+                              <RotateCcw className="w-5 h-5 text-white" strokeWidth={2.5} />
+                            ) : (
+                              <span className="text-[14px] font-bold">{stepNumber}</span>
+                            )}
+                          </div>
+
+                          {isCurrent && (
+                            <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 ring-2 ring-white"></span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Step Details beneath circle */}
+                        <div className="mt-2.5 flex flex-col items-center w-full">
+                          <span
+                            className={`text-[12.5px] font-bold block text-center leading-tight break-words w-full ${
+                              isCurrent 
+                                ? 'text-blue-950 font-extrabold' 
+                                : isReturned 
+                                ? 'text-amber-950 font-extrabold' 
+                                : isRejected 
+                                ? 'text-rose-950 font-extrabold' 
+                                : isCompleted 
+                                ? 'text-slate-800' 
+                                : 'text-slate-700'
+                            }`}
+                            title={step.approvers?.join(', ')}
+                          >
+                            {step.approvers?.join(', ')}
+                          </span>
+                          <span
+                            className="text-[11px] text-slate-500 block text-center leading-snug break-words w-full mt-1"
+                            title={roleText}
+                          >
+                            {roleText}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Arrow Connector (-->) between steps */}
+                      {sIdx < request.approvalSequence.length - 1 && (
+                        <div className="flex-1 flex items-center justify-center min-w-[28px] sm:min-w-[48px] pt-4 sm:pt-4.5 px-1">
+                          <div className="w-full flex items-center justify-center">
+                            <span
+                              className={`h-[2px] w-full rounded-l-full transition-colors ${
+                                isCompleted ? 'bg-emerald-400' : isReturned ? 'bg-amber-400' : isCurrent ? 'bg-blue-300' : 'bg-slate-200'
+                              }`}
+                            />
+                            <ArrowRight
+                              className={`w-4 h-4 shrink-0 -ml-1 transition-colors ${
+                                isCompleted
+                                  ? 'text-emerald-500'
+                                  : isReturned
+                                  ? 'text-amber-500'
+                                  : isCurrent
+                                  ? 'text-blue-500'
+                                  : 'text-slate-300'
+                              }`}
+                              strokeWidth={2.5}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Approval Timeline */}
           {groupedComments.length > 0 && (
             <div>
-              <h3 className="text-[15px] font-semibold text-slate-900 mb-4">Approval Workflow</h3>
+              <h3 className="text-[15px] font-semibold text-slate-900 mb-4">Approval History</h3>
               <div className="pl-3">
                 {groupedComments.map((group, idx) => (
                   <LevelGroup 
                     key={idx} 
                     group={group} 
-                    stepNumber={groupedComments.length - idx}
+                    stepNumber={group.stepNumber || groupedComments.length - idx}
                     isLastLevel={idx === groupedComments.length - 1} 
                     formatDateTime={formatDateTime}
                   />
@@ -526,42 +885,131 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         </div>
         
         {/* Actions Footer */}
-        {showActions && (
+        {showActions ? (
           <div className="flex flex-col relative shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)]">
             {/* Return for edits panel */}
             {isReturning && (() => {
-              // Build list of users to return to: the requester and all previous approvers
-              const involvedNames = new Set();
-              if (requester && requester.name) involvedNames.add(requester.name);
-              
-              if (request.commentsHistory && request.commentsHistory.length > 0) {
-                request.commentsHistory.forEach(action => {
-                  if (action && action.name && action.name !== currentUser?.name) {
-                    involvedNames.add(action.name);
+              // Build list of target users to return to: the original requester and previous approvers
+              const targetCandidates = [];
+              const addedUserKeys = new Set();
+
+              // Helper to resolve the correct user object from users list (handles duplicate names across departments/roles)
+              const resolveUser = (name, preferredDept = '', preferredRole = '') => {
+                if (!name) return null;
+                const cleanName = name.toLowerCase().trim();
+                const cleanDept = (preferredDept || '').toLowerCase().trim();
+                const cleanRole = (preferredRole || '').toLowerCase().trim();
+
+                // 1. Match name + role (head/md) + department
+                if (cleanRole || cleanDept) {
+                  const match = users.find(u =>
+                    u.name?.toLowerCase().trim() === cleanName &&
+                    (cleanRole ? (u.role?.toLowerCase() === cleanRole || u.departmentRole?.toLowerCase() === cleanRole) : true) &&
+                    (cleanDept ? (u.department || '').toLowerCase().trim() === cleanDept : true)
+                  );
+                  if (match) return match;
+                }
+
+                // 2. Match name + role (head/md)
+                if (cleanRole === 'head' || cleanRole === 'md') {
+                  const match = users.find(u =>
+                    u.name?.toLowerCase().trim() === cleanName &&
+                    (u.role?.toLowerCase() === cleanRole || u.departmentRole?.toLowerCase() === cleanRole)
+                  );
+                  if (match) return match;
+                }
+
+                // 3. Match name + department
+                if (cleanDept) {
+                  const match = users.find(u =>
+                    u.name?.toLowerCase().trim() === cleanName &&
+                    (u.department || '').toLowerCase().trim() === cleanDept
+                  );
+                  if (match) return match;
+                }
+
+                // 4. Default match by name
+                return users.find(u => u.name?.toLowerCase().trim() === cleanName);
+              };
+
+              // Helper to format: USERNAME - Department Head/User
+              // e.g. "ew - HR Head", "RAOO - HR User"
+              const formatReturnLabel = (u, fallbackDept = '', fallbackRole = '') => {
+                if (!u && !fallbackRole) return '';
+                const name = u?.name || '';
+                const rawRole = (u?.role || fallbackRole || 'User').toLowerCase();
+                const roleLabel = rawRole === 'md' ? 'MD' :
+                                  rawRole === 'head' ? 'Head' :
+                                  rawRole === 'admin' ? 'Admin' :
+                                  (rawRole.charAt(0).toUpperCase() + rawRole.slice(1));
+                
+                const dept = u?.department || fallbackDept || '';
+                
+                let deptRoleLabel = '';
+                if (roleLabel === 'MD') {
+                  deptRoleLabel = 'MD';
+                } else if (dept) {
+                  deptRoleLabel = `${dept} ${roleLabel}`;
+                } else {
+                  deptRoleLabel = roleLabel;
+                }
+
+                return `${name} - ${deptRoleLabel}`;
+              };
+
+              // 1. Previous approvers from approvalSequence (before current step in reverse order)
+              if (request.approvalSequence && request.approvalSequence.length > 0) {
+                const currentStepNum = request.currentStep || 1;
+                const previousSteps = request.approvalSequence
+                  .filter(step => step.step < currentStepNum)
+                  .reverse();
+
+                previousSteps.forEach(step => {
+                  (step.approvers || []).forEach(approverName => {
+                    const nameStr = typeof approverName === 'object' ? approverName.value || approverName.label : String(approverName);
+                    if (!nameStr || nameStr.toLowerCase().trim() === currentUser?.name?.toLowerCase().trim()) return;
+
+                    const u = resolveUser(nameStr, step.department, step.role);
+                    const key = (u?.id || nameStr).toString();
+                    if (!addedUserKeys.has(key)) {
+                      addedUserKeys.add(key);
+                      targetCandidates.push({
+                        value: u ? u.name : nameStr,
+                        label: formatReturnLabel(u, step.department, step.role)
+                      });
+                    }
+                  });
+                });
+              } else if (request.commentsHistory && request.commentsHistory.length > 0) {
+                // Fallback for legacy requests with commentsHistory
+                [...request.commentsHistory].reverse().forEach(action => {
+                  if (action && action.name && action.name.toLowerCase().trim() !== currentUser?.name?.toLowerCase().trim()) {
+                    const u = resolveUser(action.name);
+                    const key = (u?.id || action.name).toString();
+                    if (!addedUserKeys.has(key)) {
+                      addedUserKeys.add(key);
+                      targetCandidates.push({
+                        value: u ? u.name : action.name,
+                        label: formatReturnLabel(u)
+                      });
+                    }
                   }
                 });
               }
-              const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
-              const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : -1;
 
-              const involvedOptions = [...involvedNames]
-                .map(name => {
-                  const u = users.find(u => u.name?.toLowerCase().trim() === name?.toLowerCase().trim());
-                  if (!u || u.name === currentUser?.name) return null;
+              // 2. The original requester
+              if (requester && requester.name?.toLowerCase().trim() !== currentUser?.name?.toLowerCase().trim()) {
+                const reqKey = requester.id.toString();
+                if (!addedUserKeys.has(reqKey)) {
+                  addedUserKeys.add(reqKey);
+                  targetCandidates.push({
+                    value: requester.name,
+                    label: formatReturnLabel(requester)
+                  });
+                }
+              }
 
-                  const uRoleObj = roles.find(r => r.name?.toLowerCase() === u.role?.toLowerCase());
-                  const uLevel = uRoleObj ? uRoleObj.level : Infinity;
-
-                  // Only allow returning to users in roles strictly below the current user
-                  if (currentUserLevel !== -1 && uLevel <= currentUserLevel) return null;
-
-                  return {
-                    value: u.name,
-                    label: `${u.name} • ${u.role === 'md' ? 'MD' : (u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : '')}`
-                  };
-                })
-                .filter(Boolean)
-                .reverse();
+              const involvedOptions = targetCandidates;
 
               return (
                 <div className="px-6 py-4 border-t border-slate-200 bg-amber-50/60 space-y-3">
@@ -586,93 +1034,102 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
 
             {isApproving && (
               <div className="px-6 py-4 border-t border-slate-200 bg-blue-50/50">
-                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-3 block">Next Step Setup</span>
-                <div className="flex flex-col gap-2">
-                  {(() => {
-                    const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
-                    const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
-
-                    if (currentUserLevel === 1) {
-                      return <span className="text-sm font-semibold text-slate-700">You are providing final approval.</span>;
-                    }
-
-                    // Filter higher roles and available persons based on previous involvement
-                    let higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
-                    let availablePersons = users.filter(u => u.role === selectedReportingRole);
-
-                    const previousHigherHandlers = new Set();
-                    if (request.commentsHistory && request.commentsHistory.length > 0) {
-                      request.commentsHistory.forEach(c => {
-                        if (!c || !c.name) return;
-                        const userObj = users.find(u => u.name === c.name);
-                        if (userObj) {
-                          const userRoleObj = roles.find(r => r.name?.toLowerCase() === userObj.role?.toLowerCase());
-                          if (userRoleObj && userRoleObj.level < currentUserLevel) {
-                            previousHigherHandlers.add(userObj.name);
-                          }
-                        }
-                      });
-                    }
-
-                    if (previousHigherHandlers.size > 0) {
-                      const restrictedUsers = users.filter(u => previousHigherHandlers.has(u.name));
-                      const restrictedRolesSet = new Set(restrictedUsers.map(u => u.role));
-                      higherRoles = roles.filter(r => restrictedRolesSet.has(r.name));
-                      availablePersons = restrictedUsers.filter(u => u.role === selectedReportingRole);
-                    }
-
-                    const formatLabel = (str) => {
-                      if (!str) return '';
-                      if (str.toLowerCase() === 'md') return 'MD';
-                      return str.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                    };
-
-                    return (
-                      <div className="flex flex-col gap-3 p-1">
-                        <div>
-                          <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
-                            Reporting Role <span className="text-red-500">*</span>
-                          </label>
-                          <div className="relative">
-                            <CustomSelect
-                              name="selectedReportingRole"
-                              options={higherRoles.map(r => ({ value: r.name, label: formatLabel(r.name) }))}
-                              value={selectedReportingRole}
-                              onChange={(e) => {
-                                setSelectedReportingRole(e.target.value);
-                                setSelectedApprovers([]);
-                                setValidationError('');
-                              }}
-                              placeholder="Select reporting role"
-                              menuPlacement="top"
-                            />
-                          </div>
+                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-2 block">
+                  Workflow Approval Step
+                </span>
+                {request.approvalSequence && request.approvalSequence.length > 0 ? (
+                  (() => {
+                    const nextStep = request.approvalSequence[request.currentStep || 1];
+                    if (!nextStep) {
+                      return (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2">
+                          <Check className="w-4 h-4 text-emerald-600" />
+                          <span className="text-[13px] font-semibold text-emerald-800">
+                            You are providing final approval. Confirming will mark this request as Approved.
+                          </span>
                         </div>
-                        {selectedReportingRole && (
+                      );
+                    }
+                    return (
+                      <div className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between shadow-sm">
+                        <div>
+                          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Advances to Next Step</span>
+                          <span className="text-[13px] font-bold text-slate-800">
+                            Step {nextStep.step}: {nextStep.approvers?.join(', ')} ({nextStep.role === 'MD' ? 'Managing Director' : `${nextStep.department || ''} Head`})
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {(() => {
+                      const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+                      const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
+
+                      if (currentUserLevel === 1 || currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md') {
+                        return <span className="text-sm font-semibold text-slate-700">You are providing final approval.</span>;
+                      }
+
+                      let higherRoles = roles.filter(r => r.level < currentUserLevel && r.name?.toLowerCase() !== 'admin');
+                      let availablePersons = users.filter(u => 
+                        (u.role && u.role.toLowerCase() === selectedReportingRole?.toLowerCase()) ||
+                        (u.departmentRole && u.departmentRole.toLowerCase() === selectedReportingRole?.toLowerCase())
+                      );
+
+                      const formatLabel = (str) => {
+                        if (!str) return '';
+                        if (str.toLowerCase() === 'md') return 'MD';
+                        return str.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                      };
+
+                      return (
+                        <div className="flex flex-col gap-3 p-1">
                           <div>
                             <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
-                              Forward to <span className="text-red-500">*</span>
+                              Reporting Role <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                               <CustomSelect
-                                 name="selectedApprovers"
-                                 options={availablePersons.map(u => ({ value: u.name, label: formatLabel(u.name) }))}
-                                 value={selectedApprovers}
-                                 onChange={(e) => {
-                                   setSelectedApprovers(e.target.value);
-                                   setValidationError('');
-                                 }}
-                                 placeholder="Select person(s)"
-                                 isMulti={true}
-                                 menuPlacement="top"
+                                name="selectedReportingRole"
+                                options={higherRoles.map(r => ({ value: r.name, label: formatLabel(r.name) }))}
+                                value={selectedReportingRole}
+                                onChange={(e) => {
+                                  setSelectedReportingRole(e.target.value);
+                                  setSelectedApprovers([]);
+                                  setValidationError('');
+                                }}
+                                placeholder="Select reporting role"
+                                menuPlacement="top"
                               />
                             </div>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
+                          {selectedReportingRole && (
+                            <div>
+                              <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                                Forward to <span className="text-red-500">*</span>
+                              </label>
+                              <div className="relative">
+                                <CustomSelect
+                                   name="selectedApprovers"
+                                   options={availablePersons.map(u => ({ value: u.name, label: formatLabel(u.name) }))}
+                                   value={selectedApprovers}
+                                   onChange={(e) => {
+                                     setSelectedApprovers(e.target.value);
+                                     setValidationError('');
+                                   }}
+                                   placeholder="Select person(s)"
+                                   isMulti={true}
+                                   menuPlacement="top"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             )}
             
@@ -720,26 +1177,36 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     if (isReturning) {
                       handleActionClick('return');
                     } else if (isApproving) {
-                      const unvoted = request.forwardedTo ? (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).filter(nameObj => {
-                        const name = typeof nameObj === 'object' ? nameObj.value || nameObj.label : String(nameObj);
-                        const u = users.find(user => user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim());
-                        return u && !request.handledBy?.includes(u.id) && u.id !== currentUser?.id;
-                      }) : [];
-                      const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
-                      const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
-                      const isLastVoter = unvoted.length === 0;
-                      
-                      const requiresSelection = isLastVoter && currentUserLevel > 1 && (!selectedApprovers || selectedApprovers.length === 0 || !selectedReportingRole);
-                      
-                      if (requiresSelection) {
-                        setValidationError("You must select a reporting role and person to forward to.");
-                        return;
+                      if (!request.approvalSequence || request.approvalSequence.length === 0) {
+                        const unvoted = request.forwardedTo ? (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).filter(nameObj => {
+                          const name = typeof nameObj === 'object' ? nameObj.value || nameObj.label : String(nameObj);
+                          const u = users.find(user => user.name?.toLowerCase()?.trim() === name?.toLowerCase()?.trim());
+                          return u && !request.handledBy?.includes(u.id) && u.id !== currentUser?.id;
+                        }) : [];
+                        const currentUserRoleObj = roles.find(r => r.name?.toLowerCase() === currentUser?.role?.toLowerCase());
+                        const currentUserLevel = currentUserRoleObj ? currentUserRoleObj.level : Infinity;
+                        const isLastVoter = unvoted.length === 0;
+                        const isMDApprover = currentUserLevel === 1 || currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+                        
+                        const requiresSelection = isLastVoter && !isMDApprover && (!selectedApprovers || selectedApprovers.length === 0 || !selectedReportingRole);
+                        
+                        if (requiresSelection) {
+                          setValidationError("You must select a reporting role and person to forward to.");
+                          return;
+                        }
                       }
                       handleActionClick('approve');
                     } else {
                       setIsApproving(true);
-                      setSelectedApprovers([]);
-                      setSelectedReportingRole('');
+                      setValidationError('');
+                      const isHead = currentUser?.role?.toLowerCase() === 'head' || currentUser?.departmentRole?.toLowerCase() === 'head';
+                      if (isHead) {
+                        setSelectedReportingRole('MD');
+                        const mdUser = users.find(u => (u.role && u.role.toLowerCase() === 'md') || (u.departmentRole && u.departmentRole.toLowerCase() === 'md'));
+                        if (mdUser) {
+                          setSelectedApprovers([mdUser.name]);
+                        }
+                      }
                     }
                   }}
                   className={`px-6 py-2.5 text-sm font-semibold text-white rounded-lg shadow-sm transition-all focus:ring-2 flex items-center gap-2 ${isReturning ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 focus:ring-amber-500/30' : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 focus:ring-green-600/30'}`}
@@ -748,6 +1215,15 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                 </button>
               </div>
             </div>
+          </div>
+        ) : (
+          <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end z-10">
+            <button
+              onClick={onClose}
+              className="px-5 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
+            >
+              Close
+            </button>
           </div>
         )}
 

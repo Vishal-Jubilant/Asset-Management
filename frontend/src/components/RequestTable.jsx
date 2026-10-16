@@ -25,16 +25,29 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
   };
 
   const getDisplayStatus = (req) => {
-    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
     let isCurrentlyPendingWithMe = false;
-    if (req.status === `Pending with ${roleName}`) {
-      if (!req.forwardedTo || req.forwardedTo.length === 0) {
-        isCurrentlyPendingWithMe = true;
-      } else {
-        isCurrentlyPendingWithMe = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
-          const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-          return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-        });
+    if (req.status?.includes('Pending')) {
+      if (req.approvalSequence && req.approvalSequence.length > 0) {
+        const curStepIdx = (req.currentStep || 1) - 1;
+        const curStep = req.approvalSequence[curStepIdx];
+        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
+          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
+          isCurrentlyPendingWithMe = isMDStep || (curStep.approvers || []).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          });
+        }
+      } else if (req.status === `Pending with ${roleName}` || (req.status === 'Pending with MD' && isMD)) {
+        if (!req.forwardedTo || req.forwardedTo.length === 0) {
+          isCurrentlyPendingWithMe = true;
+        } else {
+          isCurrentlyPendingWithMe = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          }) || (req.status === 'Pending with MD' && isMD);
+        }
       }
       
       // If I already voted, it's not pending for me anymore
@@ -45,14 +58,16 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
 
     if (isCurrentlyPendingWithMe) return req.status;
 
-    if (req.requestedBy !== currentUser?.id && req.handledBy && req.handledBy.includes(currentUser?.id)) {
-      const myLastAction = [...(req.commentsHistory || [])].reverse().find(c => c.name === currentUser?.name);
+    if (req.requestedBy !== currentUser?.id) {
+      const myLastAction = [...(req.commentsHistory || [])].reverse().find(c =>
+        (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
+        ['approve', 'reject', 'return'].includes(c.action)
+      );
       if (myLastAction) {
         if (myLastAction.action === 'approve') return 'Approved';
         if (myLastAction.action === 'reject') return 'Rejected';
         if (myLastAction.action === 'return') return 'Returned';
       }
-      return 'Handled'; // Fallback
     }
 
     if (req.commentsHistory && req.commentsHistory.length > 0) {
@@ -89,6 +104,14 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
     }
 
     if (role === 'requester') {
+      if (req.requestedBy !== currentUser?.id) {
+        return (
+          <Button size="sm" variant="secondary" onClick={() => onAction('viewDetailsModal', req)}>
+            <Eye size={16} className="mr-1" /> View
+          </Button>
+        );
+      }
+
       return (
         <div className="flex items-center justify-end space-x-1">
           <button onClick={() => onAction('delete', req)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
@@ -114,7 +137,7 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
       );
     }
     
-    if (role === 'md' && req.status === 'Pending with MD') {
+    if ((role === 'md' || currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md') && req.status === 'Pending with MD') {
       return (
         <div className="flex items-center space-x-2">
           <Button size="sm" variant="outline" className="text-emerald-600 border-emerald-200 hover:bg-emerald-50" onClick={() => onAction('approve', req)}>
@@ -151,16 +174,29 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
 
   const getRequesterActions = (req) => {
     const isHandled = req.handledBy && req.handledBy.includes(currentUser?.id);
-    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
     let requiresMyAction = false;
-    if (req.status === `Pending with ${roleName}`) {
-      if (!req.forwardedTo || req.forwardedTo.length === 0) {
-        requiresMyAction = true;
-      } else {
-        requiresMyAction = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
-          const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-          return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-        });
+    if (req.status?.includes('Pending')) {
+      if (req.approvalSequence && req.approvalSequence.length > 0) {
+        const curStepIdx = (req.currentStep || 1) - 1;
+        const curStep = req.approvalSequence[curStepIdx];
+        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
+          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
+          requiresMyAction = isMDStep || (curStep.approvers || []).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          });
+        }
+      } else if (req.status === `Pending with ${roleName}` || (req.status === 'Pending with MD' && isMD)) {
+        if (!req.forwardedTo || req.forwardedTo.length === 0) {
+          requiresMyAction = true;
+        } else {
+          requiresMyAction = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          }) || (req.status === 'Pending with MD' && isMD);
+        }
       }
     }
     

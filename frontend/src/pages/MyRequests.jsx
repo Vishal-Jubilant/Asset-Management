@@ -1,4 +1,5 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import RequestTable from '../components/RequestTable';
 import StatCard from '../components/StatCard';
@@ -13,7 +14,25 @@ import {
 } from "@internationalized/date";
 
 const MyRequests = () => {
+  const navigate = useNavigate();
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
+
+  const isHead = (currentUser?.role && currentUser.role.toLowerCase() === 'head') ||
+                 (currentUser?.departmentRole && currentUser.departmentRole.toLowerCase() === 'head');
+
+  const isMD = (currentUser?.role && currentUser.role.toLowerCase() === 'md') ||
+               (currentUser?.departmentRole && currentUser.departmentRole.toLowerCase() === 'md') ||
+               (currentUser?.empCode && currentUser.empCode.toLowerCase() === 'md') ||
+               (currentUser?.name && currentUser.name.toLowerCase() === 'managing director');
+
+  const isHeadOrMD = isHead || isMD;
+
+  useEffect(() => {
+    if (currentUser && !isHeadOrMD && currentUser?.role?.toLowerCase() !== 'admin') {
+      navigate('/app', { replace: true });
+    }
+  }, [currentUser, isHeadOrMD, navigate]);
+
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editRequest, setEditRequest] = useState(null);
@@ -48,42 +67,114 @@ const MyRequests = () => {
   };
 
   const myRequests = requests.filter(r => {
+    if (!r) return false;
     if (r.requestedBy === currentUser?.id) return true;
-    
-    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-    
-    if (r.status === `Pending with ${roleName}`) {
-      if (!r.forwardedTo || r.forwardedTo.length === 0) {
-        return true;
+
+    // Keep request in the list if current user took an action (approve, reject, return)
+    const hasMyAction = (r.commentsHistory || []).some(c =>
+      (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
+      ['approve', 'reject', 'return'].includes(c.action)
+    );
+    if (hasMyAction) return true;
+
+    if (r.handledBy && r.handledBy.includes(currentUser?.id)) return true;
+
+    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+
+    // Check if user is an approver in approval sequence (Strict sequential approval: only active step approver sees pending request)
+    if (r.approvalSequence && r.approvalSequence.length > 0) {
+      if (r.status?.includes('Pending')) {
+        const curStepIdx = (r.currentStep || 1) - 1;
+        const curStep = r.approvalSequence[curStepIdx];
+        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
+          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
+          const isApproverInCurrentStep = isMDStep || (curStep.approvers || []).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          });
+          if (isApproverInCurrentStep) return true;
+        }
       }
+      return false;
+    }
+
+    // Legacy requests without approvalSequence:
+    if (r.forwardedTo && (Array.isArray(r.forwardedTo) ? r.forwardedTo.length > 0 : true)) {
       const hasForwardedToMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
         const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
         return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
       });
-      if (hasForwardedToMe) {
+      if (hasForwardedToMe) return true;
+      if (r.status === 'Pending with MD' && isMD) return true;
+      return false;
+    }
+
+    if (r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD)) {
+      const requester = users.find(u => u.id === r.requestedBy);
+      const isDeptHeadOfRequester = (currentUser?.role?.toLowerCase() === 'head' || currentUser?.departmentRole?.toLowerCase() === 'head') &&
+        currentUser?.department && requester?.department && currentUser.department.toLowerCase() === requester.department.toLowerCase();
+
+      if (!r.forwardedTo || r.forwardedTo.length === 0) {
+        if (currentUser?.role?.toLowerCase() === 'head') {
+          return isDeptHeadOfRequester;
+        }
         return true;
       }
     }
-    
-    // Keep it in the list if they previously interacted with it
-    if (r.handledBy && r.handledBy.includes(currentUser?.id)) return true;
     
     return false;
   });
 
   const getDisplayStatus = (r) => {
-    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-    let isCurrentlyPendingWithMe = false;
-    if (r.status === `Pending with ${roleName}`) {
-      if (!r.forwardedTo || r.forwardedTo.length === 0) {
-        isCurrentlyPendingWithMe = true;
-      } else {
-        isCurrentlyPendingWithMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
-          const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-          return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-        });
+    if (!r) return '';
+
+    // If I acted on this request and I am not the requester, show the exact action I clicked: Approved / Rejected / Returned
+    if (r.requestedBy !== currentUser?.id) {
+      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c =>
+        (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
+        ['approve', 'reject', 'return'].includes(c.action)
+      );
+      if (myLastAction) {
+        if (myLastAction.action === 'approve') return 'Approved';
+        if (myLastAction.action === 'reject') return 'Rejected';
+        if (myLastAction.action === 'return') return 'Returned';
       }
-      
+    }
+
+    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    const requester = users.find(u => u.id === r.requestedBy);
+    const isDeptHeadOfRequester = (currentUser?.role?.toLowerCase() === 'head' || currentUser?.departmentRole?.toLowerCase() === 'head') &&
+      currentUser?.department && requester?.department && currentUser.department.toLowerCase() === requester.department.toLowerCase();
+
+    let isCurrentlyPendingWithMe = false;
+    if (r.status?.includes('Pending')) {
+      if (r.approvalSequence && r.approvalSequence.length > 0) {
+        const curStepIdx = (r.currentStep || 1) - 1;
+        const curStep = r.approvalSequence[curStepIdx];
+        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
+          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
+          isCurrentlyPendingWithMe = isMDStep || (curStep.approvers || []).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          });
+        }
+      } else if (r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD)) {
+        if (!r.forwardedTo || r.forwardedTo.length === 0) {
+          if (currentUser?.role?.toLowerCase() === 'head') {
+            isCurrentlyPendingWithMe = isDeptHeadOfRequester;
+          } else {
+            isCurrentlyPendingWithMe = true;
+          }
+        } else {
+          isCurrentlyPendingWithMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+          }) || (r.status === 'Pending with MD' && isMD);
+        }
+      }
+
       // If I already voted, it's not pending for me anymore
       if (r.handledBy && r.handledBy.includes(currentUser?.id)) {
         isCurrentlyPendingWithMe = false;
@@ -91,16 +182,6 @@ const MyRequests = () => {
     }
 
     if (isCurrentlyPendingWithMe) return r.status || '';
-
-    if (r.requestedBy !== currentUser?.id && r.handledBy && r.handledBy.includes(currentUser?.id)) {
-      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c => c.name === currentUser?.name);
-      if (myLastAction) {
-        if (myLastAction.action === 'approve') return 'Approved';
-        if (myLastAction.action === 'reject') return 'Rejected';
-        if (myLastAction.action === 'return') return 'Returned';
-      }
-      return 'Handled';
-    }
 
     if (r.commentsHistory && r.commentsHistory.length > 0) {
       const lastAction = r.commentsHistory[r.commentsHistory.length - 1];
@@ -112,14 +193,29 @@ const MyRequests = () => {
   };
 
   const isForwardedToMe = (r) => {
-    if (r.forwardedTo && r.forwardedTo.length > 0) {
-      return (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+    if (!r || !r.status?.includes('Pending')) return false;
+    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+    if (r.approvalSequence && r.approvalSequence.length > 0) {
+      const curStepIdx = (r.currentStep || 1) - 1;
+      const curStep = r.approvalSequence[curStepIdx];
+      if (!curStep || curStep.status === 'approved' || curStep.status === 'rejected') return false;
+      if (curStep.role?.toLowerCase() === 'md' && isMD) return true;
+      return (curStep.approvers || []).some(n => {
         const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
         return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
       });
     }
-    const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-    return r.status === `Pending with ${roleName}`;
+    if (r.forwardedTo && r.forwardedTo.length > 0) {
+      const hasForwardedToMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
+        const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+        return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
+      });
+      if (hasForwardedToMe) return true;
+      if (r.status === 'Pending with MD' && isMD) return true;
+      return false;
+    }
+    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+    return r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD);
   };
 
   const stats = [
@@ -154,8 +250,9 @@ const MyRequests = () => {
         
         if (isForwardedToMe(r)) return true;
         
-        const roleName = currentUser?.role === 'md' ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-        if (r.status === `Pending with ${roleName}` && (!r.forwardedTo || r.forwardedTo.length === 0)) return true;
+        const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
+        const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
+        if ((r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD)) && (!r.forwardedTo || r.forwardedTo.length === 0)) return true;
         
         return false;
       }).length,
@@ -215,7 +312,8 @@ const MyRequests = () => {
         selectedReportingTo: forwardTo,
         selectedReportingRole: data.selectedReportingRole || '',
         requestedBy: currentUser?.id || 1,
-        attachments: data.attachments || []
+        attachments: data.attachments || [],
+        approvalSequence: data.approvalSequence || null
       };
       
       if (editRequest) {

@@ -8,15 +8,22 @@ import Button from '../components/Button';
 import NewRequestModal from '../components/NewRequestModal';
 import RequestDetailsModal from '../components/RequestDetailsModal';
 import { AppContext } from '../context/AppContext';
+import { formatNotificationDateTime, getRequestNotificationDetails } from '../utils/requestNotification';
 
 const NewRequest = () => {
   const navigate = useNavigate();
   const { currentUser, requests, setRequests, users, roles } = useContext(AppContext);
   const user = currentUser;
   
-  const maxRoleLevel = roles && roles.length > 0 ? Math.max(...roles.map(r => r.level || 1)) : 0;
-  const currentUserRoleObj = roles?.find(r => r.name === user?.role);
-  const isLastLevel = currentUserRoleObj && currentUserRoleObj.level === maxRoleLevel;
+  const isHead = (user?.role && user.role.toLowerCase() === 'head') ||
+                 (user?.departmentRole && user.departmentRole.toLowerCase() === 'head');
+
+  const isMD = (user?.role && user.role.toLowerCase() === 'md') ||
+               (user?.departmentRole && user.departmentRole.toLowerCase() === 'md') ||
+               (user?.empCode && user.empCode.toLowerCase() === 'md') ||
+               (user?.name && user.name.toLowerCase() === 'managing director');
+
+  const isHeadOrMD = isHead || isMD;
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilters, setStatusFilters] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -29,14 +36,31 @@ const NewRequest = () => {
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
-  const pendingRequestsForMe = requests.filter(r => {
-    if (user?.role === 'admin') return r.status?.includes('Pending');
-    
+  const pendingRequestsForMe = (requests || []).filter(r => {
+    if (!r) return false;
     if (r.requestedBy === user?.id) {
        return r.status === 'Returned';
     }
     
-    const requester = users.find(u => u.id === r.requestedBy);
+    if (!r.status?.includes('Pending')) return false;
+
+    const hasVoted = r.handledBy && r.handledBy.includes(user?.id);
+    if (hasVoted) return false;
+
+    const isMD = user?.role?.toLowerCase() === 'md' || user?.departmentRole?.toLowerCase() === 'md';
+
+    if (r.approvalSequence && r.approvalSequence.length > 0) {
+      const curStepIdx = (r.currentStep || 1) - 1;
+      const curStep = r.approvalSequence[curStepIdx];
+      if (!curStep || curStep.status === 'approved' || curStep.status === 'rejected') return false;
+      if (curStep.role?.toLowerCase() === 'md' && isMD) return true;
+      return (curStep.approvers || []).some(n => {
+        const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
+        return nameStr?.toLowerCase()?.trim() === user?.name?.toLowerCase()?.trim();
+      });
+    }
+
+    const requester = (users || []).find(u => u.id === r.requestedBy);
     if (!requester) return false;
     
     const isForwardedToMe = (() => {
@@ -49,23 +73,23 @@ const NewRequest = () => {
       return false;
     })();
 
+    if (isForwardedToMe) return true;
+    if (r.forwardedTo && r.forwardedTo.length > 0) return false;
+
     const isReportingToMe = (() => {
       if (r.routedTo) {
         return Array.isArray(r.routedTo) ? r.routedTo.includes(user?.name) : r.routedTo === user?.name;
       }
       return Array.isArray(requester.reportingTo)
         ? requester.reportingTo.includes(user?.name)
-        : requester.reportingTo === user?.name;
+        : Boolean(requester.reportingTo && requester.reportingTo === user?.name);
     })();
 
-    if (!r.status?.includes('Pending')) return false;
-
-    if (isForwardedToMe) return true;
-
-    const hasVoted = r.handledBy && r.handledBy.includes(user?.id);
-    const roleName = user?.role === 'md' ? 'MD' : (user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : '');
+    const roleName = isMD ? 'MD' : (user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase() : '');
+    const isDeptHeadOfRequester = (user?.role?.toLowerCase() === 'head' || user?.departmentRole?.toLowerCase() === 'head') &&
+      user?.department && requester?.department && user.department.toLowerCase() === requester.department.toLowerCase();
     
-    if (r.status === `Pending with ${roleName}` && (!r.forwardedTo || r.forwardedTo.length === 0) && isReportingToMe && !hasVoted) {
+    if ((r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD)) && (!r.forwardedTo || r.forwardedTo.length === 0) && (isReportingToMe || isDeptHeadOfRequester || isMD) && !hasVoted) {
       return true;
     }
     
@@ -84,20 +108,6 @@ const NewRequest = () => {
   const getRequesterName = (id) => {
     const found = users.find(u => u.id === id);
     return found ? found.name : 'Unknown User';
-  };
-
-  const formatDateTime = (dateString) => {
-    const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    let hours = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; 
-    const formattedHours = hours.toString().padStart(2, '0');
-    return `${day}-${month}-${year} | ${formattedHours}:${minutes} ${ampm}`;
   };
 
   useEffect(() => {
@@ -168,7 +178,8 @@ const NewRequest = () => {
         selectedReportingTo: forwardTo,
         selectedReportingRole: data.selectedReportingRole || '',
         requestedBy: user?.id || 1,
-        attachments: data.attachments || []
+        attachments: data.attachments || [],
+        approvalSequence: data.approvalSequence || null
       };
       
       if (editRequestForModal) {
@@ -184,7 +195,11 @@ const NewRequest = () => {
       alert('Failed to create request. Please try again.');
     }
   };
-  const myOwnRequests = requests.filter(r => r.requestedBy === currentUser?.id);
+  const myOwnRequests = (requests || []).filter(r => r && r.requestedBy === currentUser?.id);
+  const requestsForSection = [
+    ...myOwnRequests,
+    ...pendingRequestsForMe.filter(req => !myOwnRequests.some(ownRequest => ownRequest.id === req.id))
+  ];
 
   const filterOptions = ['Approved', 'Pending', 'Returned', 'Rejected'];
   if (myOwnRequests.some(r => r.status === 'Hold')) {
@@ -204,7 +219,7 @@ const NewRequest = () => {
     { title: 'Rejected', value: myOwnRequests.filter(r => r.status === 'Rejected').length }
   ];
 
-  const filteredRequests = myOwnRequests.filter(r => {
+  const filteredRequests = requestsForSection.filter(r => {
     const matchesSearch = r?.id?.toString()?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       r?.item?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       r?.category?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
@@ -289,7 +304,7 @@ const NewRequest = () => {
                   <span className="font-bold text-slate-800">Notifications</span>
                   {pendingRequestsForMe.length > 0 && <span className="text-[10px] font-bold bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">{pendingRequestsForMe.length} New</span>}
                 </div>
-                <button onClick={() => setIsNotificationOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-full hover:bg-slate-200/50">
+                <button onClick={() => setIsNotificationOpen(false)} className="text-slate-400 hover:text-red-600 transition-colors p-1 rounded-full hover:bg-red-50">
                   <X size={16} />
                 </button>
               </div>
@@ -297,7 +312,7 @@ const NewRequest = () => {
                 {pendingRequestsForMe.length > 0 ? (
                   <div className="flex flex-col">
                     {pendingRequestsForMe.map((req, idx) => (
-                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isLastLevel ? '/app/new-request' : '/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
                         <div className="flex items-start gap-3">
                           <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                             <Package size={14} />
@@ -306,17 +321,14 @@ const NewRequest = () => {
                             <p className="text-xs font-bold text-slate-800">{req.id}</p>
                             <p className="text-sm text-slate-600 mt-1 leading-snug">
                               {(() => {
-                                const hasReturnOrEdit = req.commentsHistory && req.commentsHistory.some(c => c.action === 'edit' || c.action === 'return');
-                                const lastActor = req.commentsHistory && req.commentsHistory.length > 0 ? req.commentsHistory[req.commentsHistory.length - 1].name : getRequesterName(req.requestedBy);
-                                
-                                if (hasReturnOrEdit) {
-                                  return <>Updated Request from <span className="font-semibold text-brand-600 capitalize">{lastActor}</span></>;
-                                } else {
-                                  return <>New Request from <span className="font-semibold text-brand-600 capitalize">{getRequesterName(req.requestedBy)}</span></>;
-                                }
+                                  const details = getRequestNotificationDetails(req, user, getRequesterName(req.requestedBy));
+                                  const label = details.type === 'new' ? 'New Request from' :
+                                    details.type === 'forwarded' ? 'Forwarded Request from' :
+                                    details.type === 'returned' ? 'Returned Request from' : 'Updated Request from';
+                                  return <>{label} <span className="font-semibold text-brand-600 capitalize">{details.sender}</span></>;
                               })()}
                             </p>
-                            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatDateTime(req.createdAt)}</p>
+                            <p className="text-[11px] text-slate-400 mt-1.5 font-medium">{formatNotificationDateTime(getRequestNotificationDetails(req, user, getRequesterName(req.requestedBy)).receivedAt)}</p>
                           </div>
                         </div>
                       </div>
@@ -338,7 +350,7 @@ const NewRequest = () => {
                     className="text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors" 
                     onClick={() => {
                       setIsNotificationOpen(false);
-                      navigate(isLastLevel ? '/app/new-request' : '/app/my-requests');
+                      navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request');
                     }}
                   >
                     View All Requests

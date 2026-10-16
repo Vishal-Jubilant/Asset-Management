@@ -7,6 +7,7 @@ export const AppProvider = ({ children }) => {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [requests, setRequests] = useState([]);
 
   const [currentUser, setCurrentUser] = useState(null);
@@ -55,16 +56,18 @@ export const AppProvider = ({ children }) => {
 
   const fetchInitialData = async () => {
     try {
-      const [usersRes, rolesRes, catsRes, reqsRes] = await Promise.all([
+      const [usersRes, rolesRes, catsRes, reqsRes, deptsRes] = await Promise.all([
         api.get('/users'),
         api.get('/roles'),
         api.get('/categories'),
-        api.get('/asset-requests')
+        api.get('/asset-requests'),
+        api.get('/departments')
       ]);
       setUsers(usersRes.data);
       setRoles(rolesRes.data);
       setCategories(catsRes.data);
       setRequests(reqsRes.data);
+      setDepartments(deptsRes.data);
     } catch (error) {
       console.error("Failed to load initial data", error);
     }
@@ -86,6 +89,7 @@ export const AppProvider = ({ children }) => {
         currentUser, setCurrentUser, 
         requests, setRequests, refreshRequests,
         categories, setCategories,
+        departments, setDepartments,
         isInitializing
     }}>
       {children}

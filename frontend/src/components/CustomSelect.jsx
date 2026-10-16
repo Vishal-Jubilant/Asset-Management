@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { ChevronDown, Check, X } from 'lucide-react';
 
 const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an option', disabled = false, required = false, isMulti = false, menuPlacement = 'bottom' }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState({});
+  const buttonRef = useRef(null);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -15,17 +18,49 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Close on scroll or resize so the portal menu does not drift
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => setIsOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [isOpen]);
+
+  const openMenu = () => {
+    if (disabled) return;
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const estimatedMenuHeight = Math.min(240, options.length * 40 + 16);
+      const openUpward =
+        menuPlacement === 'top' ||
+        (spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow);
+
+      setMenuStyle({
+        position: 'fixed',
+        width: rect.width,
+        left: rect.left,
+        zIndex: 99999,
+        ...(openUpward
+          ? { bottom: window.innerHeight - rect.top + 4, top: 'auto' }
+          : { top: rect.bottom + 4, bottom: 'auto' }),
+      });
+    }
+    setIsOpen(prev => !prev);
+  };
+
   const handleSelect = (optionValue) => {
     if (disabled) return;
-    
     if (isMulti) {
       const currentValues = Array.isArray(value) ? value : [];
-      let newValues;
-      if (currentValues.includes(optionValue)) {
-        newValues = currentValues.filter(v => v !== optionValue);
-      } else {
-        newValues = [...currentValues, optionValue];
-      }
+      const newValues = currentValues.includes(optionValue)
+        ? currentValues.filter(v => v !== optionValue)
+        : [...currentValues, optionValue];
       onChange({ target: { name, value: newValues } });
     } else {
       onChange({ target: { name, value: optionValue } });
@@ -37,28 +72,21 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
     e.stopPropagation();
     if (disabled) return;
     const currentValues = Array.isArray(value) ? value : [];
-    const newValues = currentValues.filter(v => v !== optionValue);
-    onChange({ target: { name, value: newValues } });
+    onChange({ target: { name, value: currentValues.filter(v => v !== optionValue) } });
   };
 
   const renderDisplay = () => {
     if (isMulti) {
       const currentValues = Array.isArray(value) ? value : [];
       if (currentValues.length === 0) return <span className="text-slate-400">{placeholder}</span>;
-      
       return (
         <div className="flex flex-wrap gap-1">
           {currentValues.map(val => {
             const opt = options.find(o => o.value === val);
-            const label = opt ? opt.label : val;
             return (
               <span key={val} className="inline-flex items-center gap-1 bg-brand-50 text-brand-700 text-[11px] font-semibold px-2 py-0.5 rounded border border-brand-100">
-                {label}
-                <button 
-                  type="button" 
-                  onClick={(e) => removeValue(e, val)}
-                  className="hover:bg-brand-200/50 p-0.5 rounded-full transition-colors"
-                >
+                {opt ? (opt.chipLabel || opt.label) : val}
+                <button type="button" onClick={(e) => removeValue(e, val)} className="hover:bg-brand-200/50 p-0.5 rounded-full transition-colors">
                   <X size={10} />
                 </button>
               </span>
@@ -72,74 +100,84 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
     }
   };
 
+  const menu = isOpen && !disabled ? (
+    <div
+      style={menuStyle}
+      className="max-h-60 overflow-auto rounded-md bg-white py-1 text-base shadow-lg border border-slate-200 sm:text-sm animate-in fade-in zoom-in-95 duration-100 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300"
+    >
+      <ul className="flex flex-col">
+        {options.map((option) => {
+          const isSelected = isMulti
+            ? (Array.isArray(value) && value.includes(option.value))
+            : value === option.value;
+          return (
+            <li
+              key={option.value}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                if (!option.isDisabled) handleSelect(option.value);
+              }}
+              title={option.tooltip || ''}
+              className={`relative select-none py-2 pl-3 pr-9 transition-all text-sm mx-1 my-0.5 rounded-md ${
+                option.isDisabled
+                  ? 'opacity-50 cursor-not-allowed bg-slate-50 text-slate-400'
+                  : isSelected
+                    ? 'bg-brand-50/80 text-brand-700 font-medium cursor-default'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 cursor-pointer'
+              }`}
+            >
+              <span className="block truncate">{option.label}</span>
+              {isSelected && (
+                <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-brand-600">
+                  <Check size={16} />
+                </span>
+              )}
+            </li>
+          );
+        })}
+        {options.length === 0 && (
+          <li className="relative cursor-default select-none py-2 pl-3 pr-9 text-slate-500">
+            No options available
+          </li>
+        )}
+      </ul>
+    </div>
+  ) : null;
+
   return (
     <div className="relative w-full" ref={dropdownRef}>
-      {/* Hidden input to handle 'required' validation if wrapped in a form */}
-      <input 
-        type="text" 
-        required={required && (!value || (isMulti && value.length === 0))} 
-        value={isMulti ? (Array.isArray(value) ? value.join(',') : '') : value} 
-        onChange={() => {}} 
-        className="absolute opacity-0 pointer-events-none w-full h-full" 
-        tabIndex={-1} 
+      {/* Hidden input for native form validation */}
+      <input
+        type="text"
+        required={required && (!value || (isMulti && value.length === 0))}
+        value={isMulti ? (Array.isArray(value) ? value.join(',') : '') : (value || '')}
+        onChange={() => {}}
+        className="absolute opacity-0 pointer-events-none w-full h-full"
+        tabIndex={-1}
       />
-      
+
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={openMenu}
         className={`relative w-full cursor-pointer text-left transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 flex items-center justify-between h-[46px] ${
-          disabled ? 'cursor-not-allowed bg-slate-50 border-slate-200 text-slate-500' : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
-        } border rounded-xl pl-3.5 pr-10 text-[13px] shadow-sm ${isOpen ? 'ring-2 ring-brand-500/20 border-brand-500 bg-white' : ''}`}
+          disabled
+            ? 'cursor-not-allowed bg-slate-50 border-slate-200 text-slate-500'
+            : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
+        } border rounded-xl pl-3.5 pr-10 text-[13px] shadow-sm ${isOpen ? 'ring-2 ring-brand-500/20 border-brand-500' : ''}`}
       >
-        <span className="block truncate flex-1">
-          {renderDisplay()}
-        </span>
+        <span className="block truncate flex-1">{renderDisplay()}</span>
         <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-          <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180 text-brand-500' : ''}`} />
+          <ChevronDown
+            size={16}
+            className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180 text-brand-500' : ''}`}
+          />
         </span>
       </button>
 
-      {isOpen && !disabled && (
-        <div className={`absolute z-[100] w-full max-h-60 overflow-auto rounded-md bg-white py-1 text-base shadow-lg border border-slate-200 focus:outline-none sm:text-sm animate-in fade-in zoom-in-95 duration-100 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300 ${menuPlacement === 'top' ? 'bottom-full mb-1' : 'mt-1'}`}>
-          <ul className="flex flex-col">
-            {options.map((option) => {
-              const isSelected = isMulti 
-                ? (Array.isArray(value) && value.includes(option.value))
-                : value === option.value;
-                
-              return (
-                <li
-                  key={option.value}
-                  onClick={() => !option.isDisabled && handleSelect(option.value)}
-                  title={option.tooltip || ''}
-                  className={`relative select-none py-2 pl-3 pr-9 transition-all text-sm mx-1 my-0.5 rounded-md ${
-                    option.isDisabled
-                      ? 'opacity-50 cursor-not-allowed bg-slate-50 text-slate-400'
-                      : isSelected 
-                        ? 'bg-brand-50/80 text-brand-700 font-medium cursor-default' 
-                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 cursor-pointer'
-                  }`}
-                >
-                  <span className="block truncate">
-                    {option.label}
-                  </span>
-                  {isSelected && (
-                    <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-brand-600">
-                      <Check size={16} />
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-            {options.length === 0 && (
-              <li className="relative cursor-default select-none py-2 pl-3 pr-9 text-slate-500">
-                No options available
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
+      {/* Portal — renders outside any overflow container */}
+      {menu && ReactDOM.createPortal(menu, document.body)}
     </div>
   );
 };

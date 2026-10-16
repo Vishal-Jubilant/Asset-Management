@@ -12,16 +12,23 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
   const { currentUser, setCurrentUser, roles } = useContext(AppContext);
   const user = currentUser;
 
-  const maxRoleLevel = roles && roles.length > 0 ? Math.max(...roles.map(r => r.level || 1)) : 0;
-  const currentUserRoleObj = roles?.find(r => r.name === user?.role);
-  const isLastLevel = currentUserRoleObj && currentUserRoleObj.level === maxRoleLevel;
+  const isHead = (user?.role && user.role.toLowerCase() === 'head') ||
+                 (user?.departmentRole && user.departmentRole.toLowerCase() === 'head');
+
+  const isMD = (user?.role && user.role.toLowerCase() === 'md') ||
+               (user?.departmentRole && user.departmentRole.toLowerCase() === 'md') ||
+               (user?.empCode && user.empCode.toLowerCase() === 'md') ||
+               (user?.name && user.name.toLowerCase() === 'managing director');
+
+  const isHeadOrMD = isHead || isMD;
 
   const mainLinks = [
     { name: 'Dashboard', path: '/app', icon: <LayoutDashboard size={20} /> },
     { name: 'New Request', path: '/app/new-request', icon: <FilePlus size={20} /> },
   ];
 
-  if (!isLastLevel) {
+  // ONLY for HEAD and MD - Any department user will NOT see My Requests
+  if (isHeadOrMD) {
     mainLinks.push({ name: 'My Requests', path: '/app/my-requests', icon: <List size={20} /> });
   }
 
@@ -39,15 +46,15 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
   return (
     <div className={sidebarClasses}>
       {/* Header */}
-      <div className="h-20 flex items-center justify-between px-6 pt-4">
-        <div className="flex items-center overflow-hidden">
-          <img src="/logo.png" alt="Ardent Capital Logo" className="w-9 h-9 flex-shrink-0 object-contain mt-1" />
-          {!isCollapsed && (
+      <div className={`h-20 flex items-center pt-4 ${isCollapsed ? 'justify-center px-0' : 'justify-between px-6'}`}>
+        {!isCollapsed && (
+          <div className="flex items-center overflow-hidden">
+            <img src="/logo.png" alt="Ardent Capital Logo" className="w-9 h-9 flex-shrink-0 object-contain mt-1" />
             <div className="ml-1.5 mt-1.5 flex flex-col whitespace-nowrap">
               <span className="text-slate-900 font-extrabold text-[26px] leading-tight tracking-wide">Ardent Capital</span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
         
         {/* Desktop Collapse Toggle */}
         <button 

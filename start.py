@@ -244,8 +244,56 @@ def main():
                 print("[OK] Admin user password synchronized with authentication service.")
             else:
                 print("[OK] Admin user already exists.")
+
+        # Ensure ONLY default department 'Other' exists
+        legacy_depts = ["IT", "HR", "Finance"]
+        for leg in legacy_depts:
+            leg_row = db.query(models.Department).filter(models.Department.value == leg).first()
+            if leg_row:
+                db.delete(leg_row)
+                db.commit()
+                print(f"[-] Removed legacy default department '{leg}'.")
+
+        exist_other = db.query(models.Department).filter(
+            models.Department.value.ilike("Other")
+        ).first()
+        if not exist_other:
+            db.add(models.Department(value="Other", label="Other"))
+            db.commit()
+            print("[+] Department 'Other' created.")
+        elif exist_other.value != "Other":
+            exist_other.value = "Other"
+            exist_other.label = "Other"
+            db.commit()
+
+        # Clean up legacy dummy system accounts (keep ONLY Admin)
+        dummy_users = db.query(models.User).filter(
+            (models.User.mailid.endswith('@system.local')) & (models.User.empCode != 'Admin')
+        ).all()
+        for d_user in dummy_users:
+            db.delete(d_user)
+            db.commit()
+            print(f"[-] Removed legacy dummy user '{d_user.name}' ({d_user.empCode}).")
+
+        for code in ["IT001", "HR001", "FIN001", "HW001"]:
+            dummy_u = db.query(models.User).filter(models.User.empCode == code).first()
+            if dummy_u:
+                db.delete(dummy_u)
+                db.commit()
+                print(f"[-] Removed legacy dummy user '{dummy_u.name}' ({code}).")
+
+        # Ensure default roles exist in roles table
+        default_roles = [("MD", 1), ("Head", 2), ("User", 3)]
+        for r_name, r_lvl in default_roles:
+            exist_role = db.query(models.Role).filter(models.Role.name.ilike(r_name)).first()
+            if not exist_role:
+                db.add(models.Role(name=r_name, level=r_lvl))
+                db.commit()
+            elif exist_role.level != r_lvl:
+                exist_role.level = r_lvl
+                db.commit()
     except Exception as e:
-        print(f"[-] Error creating admin user: {e}")
+        print(f"[-] Error creating admin user or seeding defaults: {e}")
     finally:
         db.close()
         

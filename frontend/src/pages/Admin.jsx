@@ -6,6 +6,7 @@ import RequestTable from '../components/RequestTable';
 import Button from '../components/Button';
 import AddUserModal from '../components/AddUserModal';
 import ManageRolesModal from '../components/ManageRolesModal';
+import ConfirmModal from '../components/ConfirmModal';
 import MultiSelectDropdown from '../components/MultiSelectDropdown';
 import { AppContext } from '../context/AppContext';
 
@@ -14,31 +15,59 @@ import api from '../utils/api';
 const Admin = () => {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [isManageRolesModalOpen, setIsManageRolesModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { users, setUsers, roles, setRoles } = useContext(AppContext);
   const [editingUser, setEditingUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilterRoles, setSelectedFilterRoles] = useState([]);
 
+  const getUserRank = (u) => {
+    if (!u) return 99;
+    const role = (u.role || '').toLowerCase().trim();
+    const deptRole = (u.departmentRole || '').toLowerCase().trim();
+    const empCode = (u.empCode || '').toLowerCase().trim();
+    const mail = (u.mailid || '').toLowerCase().trim();
+    const name = (u.name || '').toLowerCase().trim();
+    if (role === 'admin' || empCode === 'admin' || mail === 'admin@system.local' || name === 'administrator') return 0;
+    if (role === 'md' || deptRole === 'md' || empCode === 'md' || mail === 'md@system.local' || name === 'managing director') return 1;
+    return 2;
+  };
+
   const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.mailid.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.empCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = 
+      (user.name && user.name.toLowerCase().includes(q)) ||
+      (user.mailid && user.mailid.toLowerCase().includes(q)) ||
+      (user.empCode && user.empCode.toLowerCase().includes(q)) ||
+      (user.department && user.department.toLowerCase().includes(q)) ||
+      (user.role && user.role.toLowerCase().includes(q)) ||
+      (user.departmentRole && user.departmentRole.toLowerCase().includes(q)) ||
+      (user.departmentTitle && user.departmentTitle.toLowerCase().includes(q)) ||
       (user.mobile && user.mobile.includes(searchQuery));
       
-    const matchesRole = selectedFilterRoles.length === 0 || selectedFilterRoles.includes(user.role);
+    const isMD = getUserRank(user) === 1;
+    const isAdmin = getUserRank(user) === 0;
+
+    const matchesRole = selectedFilterRoles.length === 0 || 
+      selectedFilterRoles.some(r => {
+        const rLower = r.toLowerCase();
+        if (rLower === 'md' && isMD) return true;
+        if (rLower === 'admin' && isAdmin) return true;
+        return (user.role && user.role.toLowerCase() === rLower) ||
+               (user.departmentRole && user.departmentRole.toLowerCase() === rLower);
+      });
     
     return matchesSearch && matchesRole;
   }).sort((a, b) => {
-    const aIsAdmin = a.role?.toLowerCase() === 'admin';
-    const bIsAdmin = b.role?.toLowerCase() === 'admin';
-    if (aIsAdmin && !bIsAdmin) return -1;
-    if (!aIsAdmin && bIsAdmin) return 1;
-    return 0;
+    const rankA = getUserRank(a);
+    const rankB = getUserRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+    return (a.id || 0) - (b.id || 0);
   });
 
   useEffect(() => {
-    if (isAddUserModalOpen || isManageRolesModalOpen) {
+    if (isAddUserModalOpen || isManageRolesModalOpen || userToDelete) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -46,18 +75,37 @@ const Admin = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isAddUserModalOpen, isManageRolesModalOpen]);
+  }, [isAddUserModalOpen, isManageRolesModalOpen, userToDelete]);
 
   const handleEditUser = (user) => {
     setEditingUser(user);
     setIsAddUserModalOpen(true);
   };
 
-  const handleDeleteUser = async (userId) => {
+  const handleDeleteUser = (userId) => {
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) return;
+    const rank = getUserRank(targetUser);
+    if (rank === 0) {
+      alert("Admin account cannot be deleted");
+      return;
+    }
+    setUserToDelete(targetUser);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!userToDelete) return;
+    setIsDeleting(true);
     try {
-      await api.delete(`/users/${userId}`);
-      setUsers(users.filter(u => u.id !== userId));
-    } catch(e) { console.error(e); }
+      await api.delete(`/users/${userToDelete.id}`);
+      setUsers(users.filter(u => u.id !== userToDelete.id));
+      setUserToDelete(null);
+    } catch(e) { 
+      console.error(e); 
+      alert(e.response?.data?.detail || "Failed to delete user");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const stats = [
@@ -119,7 +167,12 @@ const Admin = () => {
             <div className="flex items-center gap-3">
               <MultiSelectDropdown 
                 label="Roles"
-                options={roles.map(r => ({ value: r.name, label: r.name.charAt(0).toUpperCase() + r.name.slice(1) }))}
+                options={[
+                  { value: 'Admin', label: 'Admin' },
+                  { value: 'MD', label: 'MD' },
+                  { value: 'Head', label: 'Head' },
+                  { value: 'User', label: 'User' }
+                ]}
                 selectedValues={selectedFilterRoles}
                 onChange={setSelectedFilterRoles}
               />
@@ -142,14 +195,44 @@ const Admin = () => {
         onAdd={async (data) => {
           if (editingUser) {
             try {
-              const res = await api.put(`/users/${editingUser.id}`, { name: data.username, mailid: data.mailid, empCode: data.empCode, mobile: data.mobile, role: data.role, reportingRole: data.reportingRole, reportingTo: data.reportingTo, status: data.status, password: data.password, department: 'N/A' });
+              const res = await api.put(`/users/${editingUser.id}`, { 
+                name: data.username, 
+                mailid: data.mailid, 
+                empCode: data.empCode, 
+                mobile: data.mobile, 
+                role: data.role || 'User', 
+                reportingRole: data.reportingRole, 
+                reportingTo: data.reportingTo, 
+                status: data.status, 
+                password: data.password, 
+                department: data.department || '', 
+                departmentRole: data.role || data.departmentRole || 'User' 
+              });
               setUsers(users.map(u => u.id === editingUser.id ? res.data : u));
-            } catch (e) { console.error(e); }
+            } catch (e) { 
+              console.error(e);
+              alert(e.response?.data?.detail || "Failed to update user");
+            }
           } else {
             try {
-              const res = await api.post('/users', { name: data.username, mailid: data.mailid, empCode: data.empCode, mobile: data.mobile, role: data.role, reportingRole: data.reportingRole, reportingTo: data.reportingTo, status: data.status, password: data.password || 'password123', department: 'N/A' });
+              const res = await api.post('/users', { 
+                name: data.username, 
+                mailid: data.mailid, 
+                empCode: data.empCode, 
+                mobile: data.mobile, 
+                role: data.role || 'User', 
+                reportingRole: data.reportingRole, 
+                reportingTo: data.reportingTo, 
+                status: data.status, 
+                password: data.password || 'password123', 
+                department: data.department || '', 
+                departmentRole: data.role || data.departmentRole || 'User' 
+              });
               setUsers([...users, res.data]);
-            } catch (e) { console.error(e); }
+            } catch (e) { 
+              console.error(e);
+              alert(e.response?.data?.detail || "Failed to create user");
+            }
           }
         }} 
       />
@@ -193,6 +276,19 @@ const Admin = () => {
             setRoles(newRoles);
           } catch(e) { console.error(e); }
         }}
+      />
+
+      {/* Delete User Confirmation Card Modal */}
+      <ConfirmModal
+        isOpen={!!userToDelete}
+        onClose={() => !isDeleting && setUserToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete User Account"
+        message="Are you sure you want to delete this user? This will permanently remove their access and account."
+        user={userToDelete}
+        confirmText="Delete User"
+        cancelText="Cancel"
+        isLoading={isDeleting}
       />
     </div>
   );

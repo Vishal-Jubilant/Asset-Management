@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { X, UserPlus, Eye, EyeOff } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
+import { AppContext } from '../context/AppContext';
 
 const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager', 'incharge', 'user'], users = [], editingUser }) => {
 
+  const { departments = [] } = useContext(AppContext);
   const [errorMsg, setErrorMsg] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -12,7 +14,9 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     mailid: '',
     empCode: '',
     mobile: '',
+    department: '',
     role: '',
+    departmentRole: '',
     password: '',
     status: 'Active'
   });
@@ -31,12 +35,15 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
   useEffect(() => {
     setErrorMsg('');
     if (editingUser) {
+      const existingRole = editingUser.role || editingUser.departmentRole || '';
       setFormData({
         username: editingUser.name || '',
         mailid: editingUser.mailid || '',
         empCode: editingUser.empCode || '',
         mobile: editingUser.mobile || '',
-        role: editingUser.role || '',
+        department: editingUser.department || '',
+        role: existingRole,
+        departmentRole: existingRole,
         password: editingUser.password || '',
         status: editingUser.status || 'Active'
       });
@@ -46,7 +53,9 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
         mailid: '',
         empCode: '',
         mobile: '',
+        department: '',
         role: '',
+        departmentRole: '',
         password: '',
         status: 'Active'
       });
@@ -55,7 +64,16 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
+    if (name === 'department') {
+      const isOther = (value || '').trim().toLowerCase() === 'other';
+      setFormData(prev => ({
+        ...prev,
+        department: value,
+        ...(prev.role === 'MD' && !isOther ? { role: '', departmentRole: '' } : {})
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleSubmit = (e) => {
@@ -83,51 +101,80 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
       return;
     }
 
+    if (!formData.department) {
+      setErrorMsg('Please select a department.');
+      return;
+    }
+    if (!formData.role) {
+      setErrorMsg('Please select a role.');
+      return;
+    }
+
     if (onAdd) {
-      onAdd(formData);
+      onAdd({
+        ...formData,
+        role: formData.role,
+        departmentRole: formData.role
+      });
     }
     setFormData({
       username: '',
       mailid: '',
       empCode: '',
       mobile: '',
+      department: '',
       role: '',
+      departmentRole: '',
       password: '',
       status: 'Active'
     });
     onClose();
   };
 
-  // Sort roles by level for display
-  const sortedRoles = [...roles].sort((a, b) => a.level - b.level);
+  // Role options: MD is ONLY available when Department is 'Other'
+  const roleOptions = React.useMemo(() => {
+    const isOther = (formData.department || '').trim().toLowerCase() === 'other';
+    const isEditingSystemAdmin = editingUser && editingUser.role?.toLowerCase() === 'admin';
 
-  const roleOptions = sortedRoles.map(r => {
-    let isAllowed = true;
-    let tooltip = '';
-    
-    if (r.level > 1 && (!editingUser || editingUser.role !== r.name)) {
-      const higherLevelRole = sortedRoles.find(role => role.level === r.level - 1);
-      if (higherLevelRole) {
-        const hasHigherLevelUser = users.some(u => u.role === higherLevelRole.name);
-        isAllowed = hasHigherLevelUser;
-        if (!isAllowed) {
-          tooltip = `Please create an L${r.level - 1} (${higherLevelRole.name}) user first.`;
-        }
-      }
+    const opts = [];
+    if (isEditingSystemAdmin) {
+      opts.push({ value: 'Admin', label: 'Admin' });
     }
-
-    return {
-      value: r.name,
-      label: `L${r.level} – ${r.name.charAt(0).toUpperCase() + r.name.slice(1)}`,
-      isDisabled: !isAllowed,
-      tooltip: tooltip
-    };
-  });
+    if (isOther) {
+      opts.push({ value: 'MD', label: 'MD' });
+    }
+    opts.push({ value: 'Head', label: 'Head' });
+    opts.push({ value: 'User', label: 'User' });
+    return opts;
+  }, [formData.department, editingUser]);
 
   const statusOptions = [
     { value: 'Active', label: 'Active' },
     { value: 'Inactive', label: 'Inactive' }
   ];
+
+  // Department options: Only 'Other' is default, and 'Other' is always sorted to the last position
+  const departmentOptions = React.useMemo(() => {
+    const nonOther = [];
+    let otherOption = null;
+
+    (departments || []).forEach(d => {
+      if (d && d.value) {
+        const item = { value: d.value, label: d.label || d.value };
+        if (d.value.trim().toLowerCase() === 'other') {
+          otherOption = item;
+        } else if (!nonOther.some(x => x.value.toLowerCase() === d.value.toLowerCase())) {
+          nonOther.push(item);
+        }
+      }
+    });
+
+    if (!otherOption) {
+      otherOption = { value: 'Other', label: 'Other' };
+    }
+
+    return [...nonOther, otherOption];
+  }, [departments]);
 
   const isEditingSystemAdmin = editingUser && editingUser.role?.toUpperCase() === 'ADMIN';
 
@@ -172,7 +219,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   required
                   value={formData.username}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all text-slate-700 shadow-sm"
                   placeholder="Enter username"
                 />
               </div>
@@ -184,7 +231,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   required
                   value={formData.mailid}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all text-slate-700 shadow-sm"
                   placeholder="Enter email"
                 />
               </div>
@@ -196,7 +243,7 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   required
                   value={formData.empCode}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all text-slate-700 shadow-sm"
                   placeholder="Enter emp code"
                 />
               </div>
@@ -207,23 +254,37 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                   name="mobile"
                   value={formData.mobile}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+                  className="w-full px-4 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all text-slate-700 shadow-sm"
                   placeholder="Enter mobile number"
                 />
               </div>
-              {!isEditingSystemAdmin && (
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-700">Role <span className="text-red-500">*</span></label>
-                  <CustomSelect
-                    name="role"
-                    options={roleOptions}
-                    value={formData.role}
-                    onChange={handleChange}
-                    placeholder="Select a role"
-                    required={true}
-                  />
-                </div>
-              )}
+              {/* Row 3: Department + Role */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">Department <span className="text-red-500">*</span></label>
+                <CustomSelect
+                  name="department"
+                  options={departmentOptions}
+                  value={formData.department}
+                  onChange={handleChange}
+                  placeholder="Select department"
+                  required={true}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">Role <span className="text-red-500">*</span></label>
+                <CustomSelect
+                  name="role"
+                  options={roleOptions}
+                  value={formData.role}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData(prev => ({ ...prev, role: val, departmentRole: val }));
+                  }}
+                  placeholder="Select role"
+                  required={true}
+                />
+              </div>
+              {/* Row 4: Status */}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">Status <span className="text-red-500">*</span></label>
                 <CustomSelect
@@ -246,13 +307,13 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
                     minLength="6"
                     value={formData.password}
                     onChange={handleChange}
-                    className="w-full pl-4 pr-10 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-slate-700 shadow-sm"
+                    className="w-full pl-4 pr-10 py-2 bg-white border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 transition-all text-slate-700 shadow-sm"
                     placeholder="Enter password (min. 6 characters)"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-blue-500 transition-colors focus:outline-none"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-brand-500 transition-colors focus:outline-none"
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>

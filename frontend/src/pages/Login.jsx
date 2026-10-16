@@ -1,9 +1,10 @@
 import React, { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, User, Lock, ArrowRight, Loader2, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, ArrowRight, Loader2, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { AppContext } from '../context/AppContext';
 import CustomSelect from '../components/CustomSelect';
 import api from '../utils/api';
+import logo from '../assets/logo.png';
 
 const SECURITY_QUESTIONS = [
   { id: 'place', text: 'What is your favorite place?' },
@@ -14,13 +15,14 @@ const SECURITY_QUESTIONS = [
 
 const Login = () => {
   const navigate = useNavigate();
-  const { users, setUsers, setCurrentUser } = useContext(AppContext);
+  const { setCurrentUser } = useContext(AppContext);
   
   const [step, setStep] = useState('login'); // 'login' | 'setup'
   
   // Login State
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   
   // Setup State
   const [sq1, setSq1] = useState('place');
@@ -56,12 +58,12 @@ const Login = () => {
       });
       
       const foundUser = response.data.user;
+      localStorage.setItem('token', response.data.token);
       
       if (foundUser.firstLogin) {
         setTempUser(foundUser);
         setStep('setup');
       } else {
-        localStorage.setItem('token', response.data.token);
         setCurrentUser(foundUser);
         routeUser(foundUser.role);
       }
@@ -95,9 +97,7 @@ const Login = () => {
           { id: sq1, text: questionText, answer: sa1 }
         ]
       });
-      
-      const res = await api.get('/users');
-      setUsers(res.data);
+      localStorage.removeItem('token');
       
       setStep('setup_success');
       setLoginId('');
@@ -173,7 +173,9 @@ const Login = () => {
     try {
       await api.post('/auth/reset-password', {
         loginId: loginId,
-        newPassword: newPassword
+        newPassword: newPassword,
+        questionId: selectedQuestion,
+        answer: securityAnswer
       });
       
       setStep('login');
@@ -193,18 +195,18 @@ const Login = () => {
 
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl shadow-slate-200/50 p-8 relative z-10 border border-slate-100 animate-slide-up">
         <div className="text-center mb-8">
-          <div className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-6 transition-transform duration-300 ${step === 'setup' ? 'bg-gradient-to-tr from-emerald-500 to-emerald-400 shadow-emerald-500/30' : 'bg-gradient-to-tr from-brand-600 to-brand-400 shadow-brand-500/30 group hover:scale-105'}`}>
-            {step === 'setup' ? (
-              <ShieldCheck className="text-white w-8 h-8" />
-            ) : (
-              <Package className="text-white w-8 h-8 group-hover:rotate-12 transition-transform duration-300" />
-            )}
+          <div className="inline-flex items-center justify-center mb-6">
+            <img
+              src={logo}
+              alt="Ardent Capital Logo"
+              className="w-20 h-20 object-contain hover:scale-105 transition-transform duration-300"
+            />
           </div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2 tracking-tight">
             {step === 'setup' ? 'Account Setup' : step === 'setup_success' ? 'Setup Complete!' : step.startsWith('forgot') || step === 'reset_password' ? 'Password Reset' : 'Welcome Back'}
           </h1>
           <p className="text-slate-500">
-            {step === 'setup' ? 'Please complete your security profile' : step === 'setup_success' ? 'Your account is ready to use' : step === 'forgot_password_id' ? 'Enter your email or emp code' : step === 'forgot_password_qa' ? 'Answer your security questions' : step === 'reset_password' ? 'Set your new password' : 'Sign in to AssetFlow to continue'}
+            {step === 'setup' ? 'Please complete your security profile' : step === 'setup_success' ? 'Your account is ready to use' : step === 'forgot_password_id' ? 'Enter your email or emp code' : step === 'forgot_password_qa' ? 'Answer your security questions' : step === 'reset_password' ? 'Set your new password' : 'Sign in to Ardent Capital to continue'}
           </p>
         </div>
 
@@ -252,14 +254,23 @@ const Login = () => {
                   <Lock className="h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors" />
                 </div>
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   name="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 hover:border-slate-300 transition-all text-slate-700 font-medium shadow-sm"
+                  className="w-full pl-10 pr-12 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-brand-500/10 focus:border-brand-500 hover:border-slate-300 transition-all text-slate-700 font-medium shadow-sm"
                   placeholder="••••••••"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30 rounded-r-xl"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
             </div>
 
@@ -433,10 +444,7 @@ const Login = () => {
             </button>
           </form>
         ) : step === 'setup_success' ? (
-          <div className="flex flex-col items-center justify-center space-y-6 animate-fade-in py-4">
-            <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-2">
-              <ShieldCheck className="w-10 h-10" />
-            </div>
+          <div className="flex flex-col items-center justify-center space-y-4 animate-fade-in py-4">
             <div className="text-center space-y-2">
               <h3 className="text-xl font-bold text-slate-800">You have successfully set your password!</h3>
               <p className="text-slate-500 text-sm">Your security question and password have been saved securely. You can now use your new password to access your account.</p>
