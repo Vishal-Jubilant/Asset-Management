@@ -46,11 +46,9 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   }
 
   return {
-    type: event.action === 'edit'
+    type: event.action === 'edit' || event.action === 'return'
       ? 'updated'
-      : isReturnedToRequester && event.action === 'return'
-        ? 'returned'
-        : 'forwarded',
+      : 'forwarded',
     sender: event.name || requesterName,
     receivedAt: event.date || request.updatedAt || request.createdAt
   };

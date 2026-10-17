@@ -826,15 +826,18 @@ def build_and_validate_workflow(request: AssetRequestCreate, db: Session):
         if len(workflow) == 0:
             raise HTTPException(status_code=400, detail="No eligible approver found for workflow.")
 
-    # Rule check: If requester is regular User and has department heads, verify first step has department head
-    if not user_is_head and req_dept:
+    # Regular users must include a department head, but selected department users may precede them.
+    if not user_is_head and not is_md_user(requester) and req_dept:
         dept_heads_in_db = [u for u in all_users if is_head_user(u) and (u.department or '').strip().lower() == req_dept]
         if dept_heads_in_db and len(workflow) > 0:
             dept_head_names = [u.name.lower().strip() for u in dept_heads_in_db]
-            first_step = workflow[0]
-            first_step_approvers = [a.lower().strip() for a in first_step.get("approvers", [])]
-            if not any(a in dept_head_names for a in first_step_approvers):
-                raise HTTPException(status_code=400, detail="The first approval step must be your Department Head.")
+            workflow_approver_names = [
+                approver.lower().strip()
+                for step in workflow
+                for approver in step.get("approvers", [])
+            ]
+            if not any(name in dept_head_names for name in workflow_approver_names):
+                raise HTTPException(status_code=400, detail="The approval workflow must include your Department Head.")
 
     return workflow
 

@@ -15,15 +15,6 @@ const NewRequest = () => {
   const { currentUser, requests, setRequests, users, roles } = useContext(AppContext);
   const user = currentUser;
   
-  const isHead = (user?.role && user.role.toLowerCase() === 'head') ||
-                 (user?.departmentRole && user.departmentRole.toLowerCase() === 'head');
-
-  const isMD = (user?.role && user.role.toLowerCase() === 'md') ||
-               (user?.departmentRole && user.departmentRole.toLowerCase() === 'md') ||
-               (user?.empCode && user.empCode.toLowerCase() === 'md') ||
-               (user?.name && user.name.toLowerCase() === 'managing director');
-
-  const isHeadOrMD = isHead || isMD;
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilters, setStatusFilters] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -192,7 +183,7 @@ const NewRequest = () => {
       setEditRequestForModal(null);
     } catch (error) {
       console.error('Failed to create asset request:', error);
-      alert('Failed to create request. Please try again.');
+      throw error;
     }
   };
   const myOwnRequests = (requests || []).filter(r => r && r.requestedBy === currentUser?.id);
@@ -312,7 +303,7 @@ const NewRequest = () => {
                 {pendingRequestsForMe.length > 0 ? (
                   <div className="flex flex-col">
                     {pendingRequestsForMe.map((req, idx) => (
-                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                      <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate('/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
                         <div className="flex items-start gap-3">
                           <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                             <Package size={14} />
@@ -350,7 +341,7 @@ const NewRequest = () => {
                     className="text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors" 
                     onClick={() => {
                       setIsNotificationOpen(false);
-                      navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request');
+                      navigate('/app/my-requests');
                     }}
                   >
                     View All Requests

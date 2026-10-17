@@ -324,7 +324,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
             (!stepDepartment || (u?.department || '').toLowerCase().trim() === stepDepartment) &&
             (!stepRole || (stepRole === 'md' ? isMD(u) : isHead(u)))
           );
-          const isThisDefault = sIdx === 0 && defaultHead && (
+          const isThisDefault = defaultHead && (
             (match && match.id === defaultHead.id) ||
             cleanName === (defaultHead.name || '').toLowerCase().trim()
           );
@@ -345,9 +345,9 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           }
         });
 
-        // Ensure default head is at Step 1 if requester has one and wasn't included
+        // Ensure the default department head remains in the workflow.
         if (!isWorkflowLocked && defaultHead && !reconstructed.some(a => (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
-          reconstructed.unshift({ ...defaultHead, isDefault: true });
+          reconstructed.push({ ...defaultHead, isDefault: true });
         }
 
         setWorkflow(reconstructed);
@@ -355,7 +355,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       }
     }
 
-    // Fresh request: default department head is Step 1 (locked)
+    // Fresh request: preselect the locked default department head.
     if (defaultHead) {
       setWorkflow([{ ...defaultHead, isDefault: true }]);
     } else {
@@ -407,7 +407,22 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
         // Deselect: remove from workflow and recalculate sequence numbers without gaps
         return prev.filter((a, idx) => idx !== existsIndex || a.isDefault);
       } else {
-        // Select: append with next sequence number
+        // Same-department users go before the locked default head in the sequence.
+        const isSameDepartmentUser =
+          !isHead(approver) &&
+          !isMD(approver) &&
+          (approver.department || '').trim().toLowerCase() ===
+            (currentUser?.department || '').trim().toLowerCase();
+        const defaultHeadIndex = prev.findIndex(a => isApproverSameAsDefault(a));
+        if (isSameDepartmentUser && defaultHeadIndex !== -1) {
+          return [
+            ...prev.slice(0, defaultHeadIndex),
+            { ...approver, isDefault: false },
+            ...prev.slice(defaultHeadIndex)
+          ];
+        }
+
+        // Other approvers retain selection order.
         return [...prev, { ...approver, isDefault: false }];
       }
     });
@@ -463,7 +478,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     }
 
     if (!isWorkflowLocked && defaultHead && !workflow.some(a => a.isDefault || (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
-      setValidationError('Your default department head must remain as the first approver.');
+      setValidationError('Your default department head must remain in the workflow.');
       setIsSubmitting(false);
       return;
     }
@@ -495,7 +510,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       const base64Files = await Promise.all(filePromises);
 
       if (onAdd) {
-        onAdd({
+        await onAdd({
           ...formData,
           approvalSequence: formattedSequence,
           selectedReportingTo: approverNames,
@@ -506,7 +521,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       onClose();
     } catch (err) {
       console.error('Error submitting request', err);
-      setValidationError('Failed to submit request. Please try again.');
+      const serverMessage = err.response?.data?.detail;
+      setValidationError(typeof serverMessage === 'string' ? serverMessage : 'Failed to submit request. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -695,7 +711,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                   <div className="flex flex-wrap items-center gap-1.5 py-1">
                     {workflow.map((item, idx) => {
                       const stepNum = idx + 1;
-                      const isDefault = idx === 0 && (item.isDefault || isApproverSameAsDefault(item));
+                      const isDefault = item.isDefault || isApproverSameAsDefault(item);
 
                       return (
                         <span
@@ -770,7 +786,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                         {row.map((item, itemIdx) => {
                           const globalIdx = rIdx * 4 + itemIdx;
                           const stepNum = globalIdx + 1;
-                          const isDefault = globalIdx === 0 && (item.isDefault || (defaultHead && (item?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim()));
+                          const isDefault = item.isDefault || isApproverSameAsDefault(item);
                           const isFinal = globalIdx === workflow.length - 1;
 
                           return (
@@ -801,7 +817,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                                     {item.name}
                                   </span>
                                   <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                                    {item.role === 'MD' ? 'MD' : `${item.department || ''} Head`}
+                                    {item.role === 'MD' ? 'MD' : `${item.department || 'General'} ${item.role || 'Head'}`}
                                   </span>
                                 </div>
                               </div>
@@ -928,7 +944,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                       </span>
                       {isUserDefaultHead && (
                         <span className="text-[10px] text-brand-600 bg-brand-100/70 border border-brand-200 px-1.5 py-0.2 rounded inline-flex items-center gap-1 font-semibold flex-shrink-0">
-                          <Lock size={10} /> Default (Step 1)
+                          <Lock size={10} /> Default{isSelected ? ` (Step ${stepNumber})` : ''}
                         </span>
                       )}
                     </div>

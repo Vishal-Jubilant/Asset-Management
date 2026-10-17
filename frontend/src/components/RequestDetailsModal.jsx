@@ -98,7 +98,7 @@ const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
         <div className="absolute top-6 bottom-[-24px] left-0 w-px bg-slate-200 -translate-x-[0.5px] z-0" />
       )}
       
-      <div className="pl-8 pb-6">
+      <div className="pl-4 pb-6">
         <button 
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center justify-between w-full group mb-4"
@@ -498,7 +498,10 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
     });
   }
 
-  const latestWorkflowAction = [...(request.commentsHistory || [])]
+  const commentsHistory = request.commentsHistory || [];
+  const lastEditIndex = commentsHistory.map(comment => comment.action).lastIndexOf('edit');
+  const currentWorkflowHistory = commentsHistory.slice(lastEditIndex + 1);
+  const latestWorkflowAction = [...currentWorkflowHistory]
     .reverse()
     .find(comment => ['approve', 'reject', 'return'].includes(comment.action));
   const isReturnInProgress = latestWorkflowAction?.action === 'return' &&
@@ -656,7 +659,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-[12px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <Shield size={14} className="text-blue-600" />
-                  Approval Workflow Sequence
+                  Approval Status Workflow
                 </h3>
                 <span
                   className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
@@ -677,14 +680,22 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               <div className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
                 <React.Fragment key="requester">
                   <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] px-1">
-                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center bg-white border-2 border-slate-300 text-slate-500">
-                      <User className="w-5 h-5" />
+                    <div className="relative">
+                      <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center bg-emerald-50 border-2 border-emerald-300 text-emerald-700">
+                        <User className="w-5 h-5" />
+                      </div>
+                      {isReturnInProgress && isReturnToRequester && (
+                        <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3" title="Request returned to requester">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 ring-2 ring-white" />
+                        </span>
+                      )}
                     </div>
                     <div className="mt-2.5 flex flex-col items-center w-full">
-                      <span className="text-[12.5px] font-bold text-slate-800 block text-center leading-tight break-words w-full">
+                      <span className="text-[12.5px] font-bold text-emerald-800 block text-center leading-tight break-words w-full">
                         {requester?.name || 'Requester'}
                       </span>
-                      <span className="text-[11px] text-slate-500 block text-center leading-snug break-words w-full mt-1">
+                      <span className="text-[11px] text-emerald-700 block text-center leading-snug break-words w-full mt-1">
                         {requesterDepartmentRole}
                       </span>
                     </div>
@@ -708,7 +719,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   );
 
                   // Extract the latest action specifically associated with this step or its approvers
-                  const stepComments = (request.commentsHistory || []).filter(c => {
+                  const stepComments = currentWorkflowHistory.filter(c => {
                     if (c.step && c.step === stepNumber) return true;
                     const cName = (c.name || '').toLowerCase().trim();
                     return stepApproverNames.includes(cName);
@@ -750,11 +761,9 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     (stepNumber < currentStepNum && !isOverallRejected && !isOverallReturned)
                   );
                   const roleText = (() => {
-                    const isLastStep = sIdx === request.approvalSequence.length - 1;
-                    const baseRole = step.role === 'MD' 
+                    return step.role === 'MD'
                       ? 'Managing Director' 
                       : `${step.department ? `${step.department} ` : 'Department '}${step.role || 'Head'}`;
-                    return isLastStep ? `${baseRole} (Final)` : baseRole;
                   })();
 
                   return (
@@ -828,15 +837,13 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                           <div className="w-full flex items-center justify-center">
                             <span
                               className={`h-[2px] w-full rounded-l-full transition-colors ${
-                                isCompleted ? 'bg-emerald-400' : isReturned ? 'bg-amber-400' : isCurrent ? 'bg-blue-300' : 'bg-slate-200'
+                                isCompleted ? 'bg-emerald-400' : isCurrent ? 'bg-blue-300' : 'bg-slate-200'
                               }`}
                             />
                             <ArrowRight
                               className={`w-4 h-4 shrink-0 -ml-1 transition-colors ${
                                 isCompleted
                                   ? 'text-emerald-500'
-                                  : isReturned
-                                  ? 'text-amber-500'
                                   : isCurrent
                                   ? 'text-blue-500'
                                   : 'text-slate-300'

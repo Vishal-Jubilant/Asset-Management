@@ -12,25 +12,11 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen })
   const { currentUser, setCurrentUser, roles } = useContext(AppContext);
   const user = currentUser;
 
-  const isHead = (user?.role && user.role.toLowerCase() === 'head') ||
-                 (user?.departmentRole && user.departmentRole.toLowerCase() === 'head');
-
-  const isMD = (user?.role && user.role.toLowerCase() === 'md') ||
-               (user?.departmentRole && user.departmentRole.toLowerCase() === 'md') ||
-               (user?.empCode && user.empCode.toLowerCase() === 'md') ||
-               (user?.name && user.name.toLowerCase() === 'managing director');
-
-  const isHeadOrMD = isHead || isMD;
-
   const mainLinks = [
     { name: 'Dashboard', path: '/app', icon: <LayoutDashboard size={20} /> },
     { name: 'New Request', path: '/app/new-request', icon: <FilePlus size={20} /> },
+    { name: 'My Requests', path: '/app/my-requests', icon: <List size={20} /> },
   ];
-
-  // ONLY for HEAD and MD - Any department user will NOT see My Requests
-  if (isHeadOrMD) {
-    mainLinks.push({ name: 'My Requests', path: '/app/my-requests', icon: <List size={20} /> });
-  }
 
   if (user?.role?.toLowerCase() === 'admin') {
     mainLinks.push({ name: 'Users', path: '/app/admin', icon: <Users size={20} /> });

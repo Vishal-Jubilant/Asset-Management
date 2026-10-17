@@ -339,9 +339,6 @@ const Dashboard = () => {
     // Optionally exclude my own requests from "received"
     if (r.requestedBy === user?.id) return false;
     
-    // Admin only sees their own created requests, not others'
-    if (user?.role?.toLowerCase() === 'admin') return false;
-
     // 1. Check if I took any action on this request in history
     const hasMyAction = (r.commentsHistory || []).some(c =>
       (c.name || '').toLowerCase().trim() === (user?.name || '').toLowerCase().trim() &&
@@ -411,12 +408,10 @@ const Dashboard = () => {
   });
   
   useEffect(() => {
-    if (!isHeadOrMD && pieCategory === 'My Request') {
-      setPieCategory('New Request');
-    } else if (isHeadOrMD && myCreatedRequestsRaw.length === 0 && myReceivedRequestsRaw.length > 0 && pieCategory === 'New Request') {
+    if (myCreatedRequestsRaw.length === 0 && myReceivedRequestsRaw.length > 0 && pieCategory === 'New Request') {
       setPieCategory('My Request');
     }
-  }, [isHeadOrMD, myCreatedRequestsRaw.length, myReceivedRequestsRaw.length, pieCategory]);
+  }, [myCreatedRequestsRaw.length, myReceivedRequestsRaw.length, pieCategory]);
   
   const myReceivedData = generateChartData(myReceivedRequestsRaw, chartFilter, true);
 
@@ -592,7 +587,7 @@ const Dashboard = () => {
                   {pendingRequestsForMe.length > 0 ? (
                     <div className="flex flex-col">
                       {pendingRequestsForMe.map((req, idx) => (
-                        <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                        <div key={req.id} onClick={() => { setIsNotificationOpen(false); navigate('/app/my-requests'); }} className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer ${idx !== pendingRequestsForMe.length - 1 ? 'border-b border-slate-100' : ''}`}>
                           <div className="flex items-start gap-3">
                             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                               <Package size={14} />
@@ -630,7 +625,7 @@ const Dashboard = () => {
                       className="text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors" 
                       onClick={() => {
                         setIsNotificationOpen(false);
-                        navigate(isHeadOrMD ? '/app/my-requests' : '/app/new-request');
+                        navigate('/app/my-requests');
                       }}
                     >
                       View All Requests
@@ -722,9 +717,8 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Chart 2: Requests Assigned to Me (Head / MD only) */}
-        {isHeadOrMD && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col">
+        {/* Chart 2: Requests Assigned to Me */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-[0_4px_24px_rgb(0,0,0,0.03)] flex flex-col">
           <div className="flex items-center justify-between mb-3 relative z-10">
             <h2 className="text-lg font-bold text-slate-800 flex items-center">
               <div className="w-2 h-6 bg-green-500 rounded-full mr-3"></div>
@@ -762,7 +756,6 @@ const Dashboard = () => {
             </ResponsiveContainer>
           </div>
         </div>
-        )}
 
       </div>
       </div>
@@ -787,7 +780,7 @@ const Dashboard = () => {
                 </button>
                 {isPieCategoryOpen && (
                   <div className="absolute right-0 mt-1 bg-white border border-slate-200/60 rounded-xl shadow-lg z-20 py-1 min-w-[140px] animate-in fade-in slide-in-from-top-2">
-                    {['New Request', ...(isHeadOrMD ? ['My Request'] : [])].map((cat) => (
+                    {['New Request', 'My Request'].map((cat) => (
                       <button
                         key={cat}
                         className={`w-full text-left px-4 py-2 text-[12px] font-medium transition-colors ${pieCategory === cat ? 'bg-brand-50 text-brand-600' : 'text-slate-600 hover:bg-slate-50'}`}

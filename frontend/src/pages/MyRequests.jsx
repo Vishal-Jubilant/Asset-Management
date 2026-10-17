@@ -1,5 +1,4 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import RequestTable from '../components/RequestTable';
 import StatCard from '../components/StatCard';
@@ -14,33 +13,23 @@ import {
 } from "@internationalized/date";
 
 const MyRequests = () => {
-  const navigate = useNavigate();
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
-
-  const isHead = (currentUser?.role && currentUser.role.toLowerCase() === 'head') ||
-                 (currentUser?.departmentRole && currentUser.departmentRole.toLowerCase() === 'head');
-
-  const isMD = (currentUser?.role && currentUser.role.toLowerCase() === 'md') ||
-               (currentUser?.departmentRole && currentUser.departmentRole.toLowerCase() === 'md') ||
-               (currentUser?.empCode && currentUser.empCode.toLowerCase() === 'md') ||
-               (currentUser?.name && currentUser.name.toLowerCase() === 'managing director');
-
-  const isHeadOrMD = isHead || isMD;
-
-  useEffect(() => {
-    if (currentUser && !isHeadOrMD && currentUser?.role?.toLowerCase() !== 'admin') {
-      navigate('/app', { replace: true });
-    }
-  }, [currentUser, isHeadOrMD, navigate]);
+  const isCurrentUserMD = currentUser?.role?.toLowerCase() === 'md' ||
+    currentUser?.departmentRole?.toLowerCase() === 'md' ||
+    currentUser?.empCode?.toLowerCase() === 'md' ||
+    currentUser?.name?.toLowerCase() === 'managing director';
 
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editRequest, setEditRequest] = useState(null);
   const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [assignmentFilter, setAssignmentFilter] = useState('Assigned');
   const [statusFilters, setStatusFilters] = useState([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterRef = useRef(null);
+  const [isAssignmentFilterOpen, setIsAssignmentFilterOpen] = useState(false);
+  const assignmentFilterRef = useRef(null);
 
   const [dateFilter, setDateFilter] = useState({ startDate: null, endDate: null });
   const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
@@ -54,6 +43,9 @@ const MyRequests = () => {
       if (dateFilterRef.current && !dateFilterRef.current.contains(event.target)) {
         setIsDateFilterOpen(false);
       }
+      if (assignmentFilterRef.current && !assignmentFilterRef.current.contains(event.target)) {
+        setIsAssignmentFilterOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -66,9 +58,43 @@ const MyRequests = () => {
     );
   };
 
-  const myRequests = requests.filter(r => {
+  const isAssignedToCurrentMD = (request) => {
+    if (!request) return false;
+
+    const currentUserName = (currentUser?.name || '').toLowerCase().trim();
+    const hasMyAction = (request.commentsHistory || []).some(comment =>
+      (comment.name || '').toLowerCase().trim() === currentUserName &&
+      ['approve', 'reject', 'return'].includes(comment.action)
+    );
+    const hasMyVote = (request.handledBy || []).some(id => String(id) === String(currentUser?.id));
+    if (hasMyAction || hasMyVote) return true;
+
+    if (!request.status?.includes('Pending')) return false;
+
+    if (request.approvalSequence?.length) {
+      const currentStep = request.approvalSequence[(Number(request.currentStep) || 1) - 1];
+      if (!currentStep || currentStep.status === 'approved' || currentStep.status === 'rejected' || currentStep.role?.toLowerCase() !== 'md') {
+        return false;
+      }
+      const hasCurrentMDId = (currentStep.approverIds || []).some(id => String(id) === String(currentUser?.id));
+      const hasCurrentMDName = (currentStep.approvers || []).some(approver => {
+        const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+        return name?.toLowerCase().trim() === currentUserName;
+      });
+      return hasCurrentMDId || hasCurrentMDName;
+    }
+
+    if (request.status !== 'Pending with MD') return false;
+    if (!request.forwardedTo || request.forwardedTo.length === 0) return true;
+    return (Array.isArray(request.forwardedTo) ? request.forwardedTo : [request.forwardedTo]).some(approver => {
+      const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+      return name?.toLowerCase().trim() === currentUserName;
+    });
+  };
+
+  const requestsForCurrentRole = requests.filter(r => {
     if (!r) return false;
-    if (r.requestedBy === currentUser?.id) return true;
+    if (r.requestedBy === currentUser?.id) return r.status === 'Returned';
 
     // Keep request in the list if current user took an action (approve, reject, return)
     const hasMyAction = (r.commentsHistory || []).some(c =>
@@ -125,6 +151,24 @@ const MyRequests = () => {
     
     return false;
   });
+
+  const myRequests = isCurrentUserMD
+    ? requests.filter(request => {
+        if (!request) return false;
+        const isOwnReturnedRequest =
+          String(request.requestedBy) === String(currentUser?.id) && request.status === 'Returned';
+        const assignedToMD = isAssignedToCurrentMD(request);
+
+        if (assignmentFilter === 'Assigned') return assignedToMD || isOwnReturnedRequest;
+        if (String(request.requestedBy) === String(currentUser?.id) || assignedToMD) return false;
+
+        const requester = users.find(user => String(user.id) === String(request.requestedBy));
+        const requesterRole = (requester?.role || '').toLowerCase();
+        const requesterDepartmentRole = (requester?.departmentRole || '').toLowerCase();
+        return requesterRole === 'user' || requesterDepartmentRole === 'user' ||
+          requesterRole === 'head' || requesterDepartmentRole === 'head';
+      })
+    : requestsForCurrentRole;
 
   const getDisplayStatus = (r) => {
     if (!r) return '';
@@ -327,7 +371,7 @@ const MyRequests = () => {
       setIsNewRequestModalOpen(false);
     } catch (error) {
       console.error('Failed to update asset request:', error);
-      alert('Failed to update request. Please try again.');
+      throw error;
     }
   };
 
@@ -421,7 +465,7 @@ const MyRequests = () => {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-slate-900 tracking-tight">My Requests</h1>
-        <p className="text-slate-500 mt-1 text-sm">Asset requests submitted by you and requests requiring your attention.</p>
+        <p className="text-slate-500 mt-1 text-sm">Requests requiring your attention and requests returned for updates.</p>
       </div>
 
       {/* Stat Cards */}
@@ -444,6 +488,48 @@ const MyRequests = () => {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          {isCurrentUserMD && (
+            <div className="relative" ref={assignmentFilterRef}>
+              <button
+                type="button"
+                aria-label="Assignment filter"
+                aria-haspopup="listbox"
+                aria-expanded={isAssignmentFilterOpen}
+                onClick={() => setIsAssignmentFilterOpen(open => !open)}
+                className={`inline-flex h-[42px] min-w-[150px] items-center justify-between gap-3 rounded-xl border px-4 text-sm font-medium shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/20 ${
+                  isAssignmentFilterOpen
+                    ? 'border-brand-300 bg-brand-50/40 text-brand-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <span>{assignmentFilter}</span>
+                <ChevronDown size={16} className={`text-slate-400 transition-transform ${isAssignmentFilterOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isAssignmentFilterOpen && (
+                <div role="listbox" aria-label="Assignment filter options" className="absolute right-0 z-20 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-sm shadow-xl animate-in fade-in zoom-in-95 duration-100">
+                  {['Assigned', 'Not Assigned'].map(option => (
+                    <button
+                      key={option}
+                      type="button"
+                      role="option"
+                      aria-selected={assignmentFilter === option}
+                      onClick={() => {
+                        setAssignmentFilter(option);
+                        setIsAssignmentFilterOpen(false);
+                      }}
+                      className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
+                        assignmentFilter === option
+                          ? 'bg-emerald-50 font-medium text-emerald-700'
+                          : 'text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={handleDownloadData}
             disabled={filteredRequests.length === 0}
