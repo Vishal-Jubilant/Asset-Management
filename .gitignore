@@ -19,6 +19,7 @@ backend/.coverage
 backend/htmlcov/
 backend/instance/
 backend/.webassets-cache
+backend/certs/
 
 # Python generic
 __pycache__/

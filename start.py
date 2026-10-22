@@ -6,6 +6,10 @@ import socket
 import urllib.parse
 import re
 
+CERTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", "certs")
+CERT_FILE = os.path.join(CERTS_DIR, "cert.pem")
+KEY_FILE  = os.path.join(CERTS_DIR, "key.pem")
+
 if sys.platform.startswith('win'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -97,6 +101,65 @@ def stop_process(proc):
     except Exception:
         pass
 
+def generate_ssl_certs():
+    """Auto-generate a self-signed certificate valid for 10 years if one doesn't exist."""
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        return  # Already present
+    os.makedirs(CERTS_DIR, exist_ok=True)
+    try:
+        import ipaddress
+        import datetime
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        hostname = socket.gethostname()
+        try:
+            local_ip = socket.gethostbyname(hostname)
+        except Exception:
+            local_ip = '127.0.0.1'
+
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, 'IN'),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Asset Management'),
+            x509.NameAttribute(NameOID.COMMON_NAME, 'localhost'),
+        ])
+        san_list = [
+            x509.DNSName('localhost'),
+            x509.DNSName('paperless'),
+            x509.DNSName(hostname),
+            x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
+        ]
+        if local_ip != '127.0.0.1':
+            san_list.append(x509.IPAddress(ipaddress.IPv4Address(local_ip)))
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.utcnow())
+            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+            .add_extension(x509.SubjectAlternativeName(san_list), critical=False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+        with open(KEY_FILE, 'wb') as f:
+            f.write(key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption()
+            ))
+        with open(CERT_FILE, 'wb') as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        print(f"[+] SSL certificate generated -> backend/certs/")
+    except Exception as e:
+        print(f"[!] Could not generate SSL certificates: {e}")
+        print("    Servers will fall back to HTTP.")
+
 def main():
     # STEP 1: Virtual Environment Check & Activation
     venv_path = os.path.join(BACKEND_DIR, "venv")
@@ -132,6 +195,14 @@ def main():
     print("=" * 40)
     print("\nSTEP 1: Checking Virtual Environment...")
     # (Passed successfully since we are in the venv)
+
+    print("STEP 1b: Checking SSL Certificates...")
+    generate_ssl_certs()
+    ssl_available = os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE)
+    if ssl_available:
+        print("[OK] SSL certificates found.")
+    else:
+        print("[!] SSL certificates not available. Running in HTTP mode.")
 
     print("STEP 2: Verifying Database Credentials...")
     db_url = get_db_url()
@@ -302,6 +373,7 @@ def main():
     backend_running = is_port_in_use(4000, host=local_ip)
     frontend_running = is_port_in_use(4001, host=local_ip)
 
+    protocol = "https" if ssl_available else "http"
     print("=" * 40)
     print("APPLICATION STARTING...")
     print("=" * 40)
@@ -309,8 +381,13 @@ def main():
     print("Database: Connected")
     print("Schema:   Validated")
     print(f"Frontend: {'Already Running' if frontend_running else 'Starting...'}")
-    print(f"\nFrontend URL: http://localhost:4001  (Network: http://{local_ip}:4001)")
-    print(f"Backend URL:  http://localhost:4000  (Network: http://{local_ip}:4000)")
+    print(f"SSL:      {'Enabled (HTTPS)' if ssl_available else 'Disabled (HTTP)'}")
+    print(f"\nFrontend URL: {protocol}://localhost:4001  (Network: {protocol}://{local_ip}:4001)")
+    print(f"Backend URL:  {protocol}://localhost:4000  (Network: {protocol}://{local_ip}:4000)")
+    if ssl_available:
+        print(f"\n  [!] First visit -> browser will show a security warning.")
+        print(f"      Click 'Advanced' -> 'Proceed to localhost' to accept the")
+        print(f"      self-signed certificate.")
     print("=" * 40)
     print("Press Ctrl+C to stop all servers.")
     print("=" * 40 + "\n")
@@ -320,6 +397,8 @@ def main():
 
     if not backend_running:
         backend_cmd = [python_exe, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "4000"]
+        if ssl_available:
+            backend_cmd += ["--ssl-keyfile", KEY_FILE, "--ssl-certfile", CERT_FILE]
         backend_process = subprocess.Popen(
             backend_cmd,
             cwd=BACKEND_DIR,
