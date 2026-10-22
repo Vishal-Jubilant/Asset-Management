@@ -357,7 +357,8 @@ const MyRequests = () => {
         selectedReportingRole: data.selectedReportingRole || '',
         requestedBy: currentUser?.id || 1,
         attachments: data.attachments || [],
-        approvalSequence: data.approvalSequence || null
+        approvalSequence: data.approvalSequence || null,
+        returnReply: data.returnReply || ''
       };
       
       if (editRequest) {

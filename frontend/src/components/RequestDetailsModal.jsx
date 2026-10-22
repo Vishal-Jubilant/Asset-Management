@@ -109,11 +109,11 @@ const LevelGroup = ({ group, stepNumber, isLastLevel, formatDateTime }) => {
             ) : (
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
             )}
-            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{stepNumber}. {headingRole}</h4>
+            <h4 className="text-sm font-semibold text-slate-800 uppercase tracking-wide">{stepNumber}. {group.isRequesterGroup ? group.role : headingRole}</h4>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-              {group.comments.length} Approver{group.comments.length !== 1 && 's'}
+              {group.isRequesterGroup ? group.role : `${group.comments.length} Approver${group.comments.length !== 1 ? 's' : ''}`}
             </span>
           </div>
         </button>
@@ -454,22 +454,25 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         }
       }
       
-      const workflowStep = resolveCommentStep(c);
       const cName = (c.name || '').toLowerCase().trim();
+      const isRequesterComment = cName === (requester?.name || '').toLowerCase().trim();
+      const workflowStep = isRequesterComment ? null : resolveCommentStep(c);
       const u = users.find(user =>
         user.name?.toLowerCase().trim() === cName &&
         (!workflowStep?.department || (user.department || '').toLowerCase().trim() === workflowStep.department.toLowerCase().trim())
       ) || users.find(user => user.name?.toLowerCase().trim() === cName);
       const roleText = [workflowStep?.role, c.role, u?.role, u?.departmentRole].filter(Boolean).join(' ').toLowerCase();
-      const isMDApprover = workflowStep?.role?.toLowerCase() === 'md' ||
-        u?.role?.toLowerCase() === 'md' || u?.departmentRole?.toLowerCase() === 'md' || /\bmd\b/.test(roleText);
-      const isHeadApprover = workflowStep?.role?.toLowerCase() === 'head' ||
-        u?.role?.toLowerCase() === 'head' || u?.departmentRole?.toLowerCase() === 'head' || /\bhead\b/.test(roleText);
-      if (!isMDApprover && !isHeadApprover && !workflowStep) return;
+      const isMDApprover = !isRequesterComment && (workflowStep?.role?.toLowerCase() === 'md' ||
+        u?.role?.toLowerCase() === 'md' || u?.departmentRole?.toLowerCase() === 'md' || /\bmd\b/.test(roleText));
+      const isHeadApprover = !isRequesterComment && (workflowStep?.role?.toLowerCase() === 'head' ||
+        u?.role?.toLowerCase() === 'head' || u?.departmentRole?.toLowerCase() === 'head' || /\bhead\b/.test(roleText));
+      if (!isRequesterComment && !isMDApprover && !isHeadApprover && !workflowStep) return;
 
       const department = workflowStep?.department || u?.department || c.department || '';
       const stepRole = workflowStep?.role || (isMDApprover ? 'MD' : isHeadApprover ? 'Head' : u?.role || 'User');
-      const historyRole = isMDApprover ? 'MD' : `${department ? `${department} ` : ''}${stepRole}`;
+      const historyRole = isRequesterComment
+        ? requesterDepartmentRole
+        : isMDApprover ? 'MD' : `${department ? `${department} ` : ''}${stepRole}`;
       const voteAction = c.action || (u ? request.votes?.[u.id] : undefined);
       const sentToObj = u && request.approverSelections ? request.approverSelections[u.id] : undefined;
       const sentToStr = voteAction === 'return'
@@ -484,19 +487,26 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       }).join(', ') : '';
       
       const enrichedComment = { ...c, role: historyRole, originalIdx, receivedDate, voteAction, sentToStr };
-      const stepNumber = workflowStep
+      const stepNumber = isRequesterComment ? null : workflowStep
         ? Number(workflowStep.step || approvalSteps.indexOf(workflowStep) + 1)
         : Number(c.step) || groupedComments.length + 1;
-      const groupKey = workflowStep ? `step-${stepNumber}` : `legacy-${historyRole}-${stepNumber}`;
+      const groupKey = isRequesterComment ? 'requester' : workflowStep ? `step-${stepNumber}` : `legacy-${historyRole}-${stepNumber}`;
       let group = groupsByStep.get(groupKey);
       if (!group) {
-        group = { key: groupKey, role: historyRole, stepNumber, comments: [] };
+        group = { key: groupKey, role: historyRole, stepNumber, isRequesterGroup: isRequesterComment, comments: [] };
         groupsByStep.set(groupKey, group);
         groupedComments.push(group);
       }
       group.comments.push(enrichedComment);
     });
   }
+  groupedComments.sort((a, b) => {
+    const aHasPending = a.comments.some(comment => comment.voteAction === 'pending');
+    const bHasPending = b.comments.some(comment => comment.voteAction === 'pending');
+    if (aHasPending !== bHasPending) return aHasPending ? -1 : 1;
+    if (a.isRequesterGroup !== b.isRequesterGroup) return a.isRequesterGroup ? -1 : 1;
+    return (a.stepNumber ?? Number.MAX_SAFE_INTEGER) - (b.stepNumber ?? Number.MAX_SAFE_INTEGER);
+  });
 
   const commentsHistory = request.commentsHistory || [];
   const lastEditIndex = commentsHistory.map(comment => comment.action).lastIndexOf('edit');
@@ -869,7 +879,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <LevelGroup 
                     key={idx} 
                     group={group} 
-                    stepNumber={group.stepNumber || groupedComments.length - idx}
+                    stepNumber={idx + 1}
                     isLastLevel={idx === groupedComments.length - 1} 
                     formatDateTime={formatDateTime}
                   />

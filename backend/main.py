@@ -82,6 +82,7 @@ class AssetRequestCreate(BaseModel):
     requestedBy: int
     attachments: Optional[list] = []
     approvalSequence: Optional[List[Any]] = None
+    returnReply: Optional[str] = ""
 
 class ActionRequest(BaseModel):
     action: Literal['approve', 'reject', 'return']
@@ -1145,6 +1146,8 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
         raise HTTPException(status_code=403, detail="Not authorized to edit this request")
     if request.requestedBy != r.requestedBy:
         raise HTTPException(status_code=400, detail="The requester cannot be changed")
+
+    was_returned = r.status == "Returned"
         
     workflow = build_and_validate_workflow(request, db)
     first_step = workflow[0]
@@ -1173,6 +1176,22 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     
     comments = list(r.commentsHistory) if r.commentsHistory else []
     requester = db.query(models.User).filter(models.User.id == request.requestedBy).first()
+    reply_text = (request.returnReply or "").strip()
+    if was_returned and caller.id == r.requestedBy and reply_text:
+        if len(reply_text) > 1000:
+            raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
+        return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
+        if return_comment is not None:
+            replies = list(return_comment.get("replies") or [])
+            user_role_label = 'MD' if is_md_user(caller) else ('Head' if is_head_user(caller) else (caller.role.capitalize() if caller.role else 'User'))
+            dept_label = f"{caller.department} " if caller.department else ""
+            replies.append({
+                "name": caller.name,
+                "role": f"{dept_label}{user_role_label}",
+                "comment": reply_text,
+                "date": datetime.now().isoformat()
+            })
+            return_comment["replies"] = replies
     comments.append({
         "name": requester.name if requester else "Requester",
         "role": requester.role.capitalize() if requester and requester.role else "User",

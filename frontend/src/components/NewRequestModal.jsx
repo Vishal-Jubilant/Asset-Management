@@ -36,6 +36,12 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     editRequest?.approvalSequence?.length &&
     editRequest.commentsHistory?.some(comment => comment.action === 'return')
   );
+  const latestReturnCommentIndex = editRequest?.commentsHistory
+    ?.map(comment => comment.action)
+    .lastIndexOf('return') ?? -1;
+  const canReplyToReturn = isWorkflowLocked &&
+    editRequest?.status === 'Returned' &&
+    String(currentUser?.id) === String(editRequest?.requestedBy);
 
   /* User context helpers */
   /* Approver data from backend */
@@ -60,6 +66,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const [fileError, setFileError] = useState('');
   const [validationError, setValidationError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [returnReply, setReturnReply] = useState('');
   const fileInputRef = useRef(null);
 
   const dropdownDirectionRef = useRef('up');
@@ -379,6 +386,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     setAttachedFiles([]);
     setFileError('');
     setValidationError('');
+    setReturnReply('');
   }, [isOpen, editRequest, categories]);
 
   // Group workflow into rows of up to 4 items each (4 selectors per row)
@@ -515,7 +523,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           approvalSequence: formattedSequence,
           selectedReportingTo: approverNames,
           selectedReportingRole: formattedSequence[0]?.role || 'Head',
-          attachments: base64Files
+          attachments: base64Files,
+          returnReply: canReplyToReturn ? returnReply.trim() : ''
         });
       }
       onClose();
@@ -633,8 +642,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                 <label className="text-[13px] font-medium text-slate-700">
                   Description <span className="text-red-500 ml-0.5">*</span>
                 </label>
-                <span className={`text-[11px] font-medium tabular-nums ${formData.justification.length > 180 ? 'text-rose-500' : 'text-slate-400'}`}>
-                  {formData.justification.length}/200
+                <span className={`text-[11px] font-medium tabular-nums ${formData.justification.length > 900 ? 'text-rose-500' : 'text-slate-400'}`}>
+                  {formData.justification.length}/1000
                 </span>
               </div>
               <textarea
@@ -644,7 +653,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                 value={formData.justification}
                 onChange={handleChange}
                 required
-                maxLength={200}
+                maxLength={1000}
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-800 text-[13px] resize-none shadow-sm transition-all placeholder:text-slate-400"
               />
             </div>
@@ -839,20 +848,47 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                   Approval Workflow Comments
                 </h3>
                 <div className="space-y-3">
-                  {editRequest.commentsHistory.map((c, i) => (
-                    <div key={i} className={`p-3 rounded-lg border ${c.action === 'return' ? 'bg-amber-50/50 border-amber-100' : c.action === 'reject' ? 'bg-rose-50/50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-slate-800 text-[12px]">{i + 1}. {c.name} <span className="text-slate-500 font-normal ml-1">({c.role})</span></span>
-                        <span className="text-slate-400 font-medium text-[10px]">{new Date(c.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                  {[...editRequest.commentsHistory].reverse().map((c, i) => {
+                    const historyIndex = editRequest.commentsHistory.length - i - 1;
+                    const isReplyTarget = canReplyToReturn && historyIndex === latestReturnCommentIndex;
+                    return (
+                      <div key={historyIndex} className={`p-3 rounded-lg border ${c.action === 'return' ? 'bg-amber-50/50 border-amber-100' : c.action === 'reject' ? 'bg-rose-50/50 border-rose-100' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-slate-800 text-[12px]">{historyIndex + 1}. {c.name} <span className="text-slate-500 font-normal ml-1">({c.role})</span></span>
+                          <span className="text-slate-400 font-medium text-[10px]">{new Date(c.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                        </div>
+                        <p className="text-slate-700 text-[13px]">{c.comment || 'No comment provided.'}</p>
+                        <div className="mt-1.5 text-[10px] font-bold uppercase tracking-wider">
+                          <span className={c.action === 'approve' ? 'text-emerald-600' : c.action === 'reject' ? 'text-rose-600' : 'text-amber-600'}>
+                            {c.action === 'approve' ? 'Approved' : c.action === 'reject' ? 'Declined' : c.action === 'return' ? 'Returned' : 'Responded'}
+                          </span>
+                        </div>
+                        {c.replies?.map((reply, replyIndex) => (
+                          <div key={replyIndex} className="mt-2 ml-4 rounded-lg border border-emerald-100 bg-emerald-50/70 p-2.5">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-semibold text-slate-800 text-[11px]">{reply.name} <span className="text-slate-500 font-normal ml-1">({reply.role})</span></span>
+                              <span className="text-slate-400 text-[10px]">{new Date(reply.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                            </div>
+                            <p className="text-slate-700 text-[12px]">{reply.comment}</p>
+                          </div>
+                        ))}
+                        {isReplyTarget && (
+                          <div className="mt-3 border-t border-amber-100 pt-3">
+                            <textarea
+                              value={returnReply}
+                              onChange={event => setReturnReply(event.target.value)}
+                              maxLength={1000}
+                              rows={2}
+                              placeholder="Write a reply to this return..."
+                              aria-label="Reply to returned request"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 resize-none"
+                            />
+                            <div className="mt-1 text-right text-[10px] text-slate-400">{returnReply.length}/1000</div>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-slate-700 text-[13px]">{c.comment || 'No comment provided.'}</p>
-                      <div className="mt-1.5 text-[10px] font-bold uppercase tracking-wider">
-                        <span className={c.action === 'approve' ? 'text-emerald-600' : c.action === 'reject' ? 'text-rose-600' : 'text-amber-600'}>
-                          {c.action === 'approve' ? 'Approved' : c.action === 'reject' ? 'Declined' : c.action === 'return' ? 'Returned' : 'Responded'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
