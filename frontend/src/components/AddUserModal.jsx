@@ -65,11 +65,11 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === 'department') {
-      const isOther = (value || '').trim().toLowerCase() === 'other';
+      const isManagingDirectory = (value || '').trim().toLowerCase() === 'managing directory';
       setFormData(prev => ({
         ...prev,
         department: value,
-        ...(prev.role === 'MD' && !isOther ? { role: '', departmentRole: '' } : {})
+        ...(prev.role === 'MD' && !isManagingDirectory ? { role: '', departmentRole: '' } : {})
       }));
     } else {
       setFormData(prev => ({ ...prev, [name]: value }));
@@ -131,17 +131,18 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     onClose();
   };
 
-  // Role options: MD is ONLY available when Department is 'Other'
+  // Role options: MD is only available in Managing Directory.
   const roleOptions = React.useMemo(() => {
-    const isOther = (formData.department || '').trim().toLowerCase() === 'other';
+    const isManagingDirectory = (formData.department || '').trim().toLowerCase() === 'managing directory';
     const isEditingSystemAdmin = editingUser && editingUser.role?.toLowerCase() === 'admin';
+
+    if (isManagingDirectory) {
+      return [{ value: 'MD', label: 'MD' }];
+    }
 
     const opts = [];
     if (isEditingSystemAdmin) {
       opts.push({ value: 'Admin', label: 'Admin' });
-    }
-    if (isOther) {
-      opts.push({ value: 'MD', label: 'MD' });
     }
     opts.push({ value: 'Head', label: 'Head' });
     opts.push({ value: 'User', label: 'User' });
@@ -153,27 +154,27 @@ const AddUserModal = ({ isOpen, onClose, onAdd, roles = ['admin', 'md', 'manager
     { value: 'Inactive', label: 'Inactive' }
   ];
 
-  // Department options: Only 'Other' is default, and 'Other' is always sorted to the last position
+  // Keep Managing Directory at the end of the department options.
   const departmentOptions = React.useMemo(() => {
-    const nonOther = [];
-    let otherOption = null;
+    const regularDepartments = [];
+    let managingDirectoryOption = null;
 
     (departments || []).forEach(d => {
       if (d && d.value) {
         const item = { value: d.value, label: d.label || d.value };
-        if (d.value.trim().toLowerCase() === 'other') {
-          otherOption = item;
-        } else if (!nonOther.some(x => x.value.toLowerCase() === d.value.toLowerCase())) {
-          nonOther.push(item);
+        if (d.value.trim().toLowerCase() === 'managing directory') {
+          managingDirectoryOption = item;
+        } else if (!regularDepartments.some(x => x.value.toLowerCase() === d.value.toLowerCase())) {
+          regularDepartments.push(item);
         }
       }
     });
 
-    if (!otherOption) {
-      otherOption = { value: 'Other', label: 'Other' };
+    if (!managingDirectoryOption) {
+      managingDirectoryOption = { value: 'Managing Directory', label: 'Managing Directory' };
     }
 
-    return [...nonOther, otherOption];
+    return [...regularDepartments, managingDirectoryOption];
   }, [departments]);
 
   const isEditingSystemAdmin = editingUser && editingUser.role?.toUpperCase() === 'ADMIN';

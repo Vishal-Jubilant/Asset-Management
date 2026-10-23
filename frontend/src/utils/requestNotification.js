@@ -21,9 +21,18 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   const currentStep = Number(request.currentStep || 1);
   const isRequester = String(request.requestedBy) === String(currentUser?.id);
   const isReturnedToRequester = request.status === 'Returned' && isRequester;
+  const latestReturnEvent = [...history].reverse().find(comment => comment.action === 'return');
   const latestWorkflowEvent = [...history].reverse().find(comment =>
     ['approve', 'reject', 'return'].includes(comment.action)
   );
+  const latestReturnReply = latestReturnEvent?.replies?.at(-1);
+  const replyIsLatestEvent = latestReturnReply &&
+    new Date(latestReturnReply.date).getTime() >= new Date(latestWorkflowEvent?.date || 0).getTime();
+  const replyEvent = request.status?.includes('Pending') &&
+    normalizeName(latestReturnEvent?.name) === normalizeName(currentUser?.name) &&
+    replyIsLatestEvent
+    ? latestReturnReply
+    : null;
   const returnEvent = latestWorkflowEvent?.action === 'return' && (
     isReturnedToRequester ||
     normalizeName(latestWorkflowEvent.sentToStr) === normalizeName(currentUser?.name)
@@ -35,7 +44,7 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   const approvalEvent = latestWorkflowEvent?.action === 'approve' && Number(latestWorkflowEvent.step) === currentStep - 1
     ? latestWorkflowEvent
     : null;
-  const event = returnEvent || editEvent || approvalEvent;
+  const event = replyEvent || returnEvent || editEvent || approvalEvent;
 
   if (!event) {
     return {
@@ -46,10 +55,12 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   }
 
   return {
-    type: event.action === 'edit' || event.action === 'return'
-      ? 'updated'
-      : 'forwarded',
-    sender: event.name || requesterName,
+    type: replyEvent
+      ? 'reply'
+      : event.action === 'return'
+        ? 'returned'
+        : event.action === 'edit' ? 'updated' : 'forwarded',
+    sender: replyEvent?.name || event.name || requesterName,
     receivedAt: event.date || request.updatedAt || request.createdAt
   };
 };

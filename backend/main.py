@@ -91,6 +91,9 @@ class ActionRequest(BaseModel):
     selectedReportingRole: Optional[str] = None
     userId: int  # The user making the action
 
+class ReturnReplyRequest(BaseModel):
+    returnReply: str
+
 def format_user(user):
     u_dict = {c: getattr(user, c) for c in user.__table__.columns.keys()}
     rep = u_dict.get("reportingTo")
@@ -499,14 +502,14 @@ async def get_departments(authorization: str = Header(None), db: Session = Depen
     depts = db.query(models.Department).all()
     if not depts:
         defaults = [
-            models.Department(value="Other", label="Other")
+            models.Department(value="Managing Directory", label="Managing Directory")
         ]
         db.add_all(defaults)
         db.commit()
         depts = db.query(models.Department).all()
-    non_other = [d for d in depts if (d.value or '').strip().lower() != 'other']
-    other_depts = [d for d in depts if (d.value or '').strip().lower() == 'other']
-    sorted_depts = non_other + other_depts
+    regular_departments = [d for d in depts if (d.value or '').strip().lower() != 'managing directory']
+    managing_directory = [d for d in depts if (d.value or '').strip().lower() == 'managing directory']
+    sorted_depts = regular_departments + managing_directory
     return [{c: getattr(d, c) for c in d.__table__.columns.keys()} for d in sorted_depts]
 
 @app.post("/api/departments", status_code=201)
@@ -1136,6 +1139,90 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
     db.refresh(r)
     return {c: getattr(r, c) for c in r.__table__.columns.keys()}
 
+@app.post("/api/asset-requests/{request_id}/reply")
+async def reply_to_returned_request(request_id: str, payload: ReturnReplyRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
+    caller = get_caller(authorization, db)
+    r = db.query(models.AssetRequest).filter(models.AssetRequest.id == request_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+    reply_text = payload.returnReply.strip()
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="Reply cannot be empty")
+    if len(reply_text) > 1000:
+        raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
+
+    comments = list(r.commentsHistory) if r.commentsHistory else []
+    return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
+    if return_comment is None:
+        raise HTTPException(status_code=400, detail="No return message was found")
+
+    workflow = list(r.approvalSequence) if r.approvalSequence else []
+    if not workflow:
+        raise HTTPException(status_code=400, detail="No approval workflow was found")
+
+    try:
+        return_step_number = int(return_comment.get("step") or 0)
+    except (TypeError, ValueError):
+        return_step_number = 0
+    returner_name = str(return_comment.get("name") or "").strip().lower()
+    returner_step_index = next(
+        (index for index, step in enumerate(workflow)
+         if int(step.get("step") or index + 1) == return_step_number),
+        next((index for index, step in enumerate(workflow)
+              if any(str(name).strip().lower() == returner_name for name in step.get("approvers", []))), -1)
+    )
+    if returner_step_index < 0:
+        raise HTTPException(status_code=400, detail="The approver who returned this request is not in its workflow")
+
+    is_requester_reply = caller.id == r.requestedBy and r.status == "Returned"
+    current_step_index = (r.currentStep or 1) - 1
+    active_step = workflow[current_step_index] if 0 <= current_step_index < len(workflow) else {}
+    active_approvers = [str(name).strip().lower() for name in active_step.get("approvers", [])]
+    return_recipient = str(return_comment.get("sentToStr") or "").strip().lower()
+    is_approver_reply = (
+        r.status.startswith("Pending") and
+        caller.name.strip().lower() == return_recipient and
+        caller.name.strip().lower() in active_approvers
+    )
+    if not is_requester_reply and not is_approver_reply:
+        raise HTTPException(status_code=403, detail="Only the requester or designated return recipient can reply")
+
+    user_role_label = 'MD' if is_md_user(caller) else ('Head' if is_head_user(caller) else (caller.role.capitalize() if caller.role else 'User'))
+    dept_label = f"{caller.department} " if caller.department else ""
+    replies = list(return_comment.get("replies") or [])
+    replies.append({
+        "name": caller.name,
+        "role": f"{dept_label}{user_role_label}",
+        "comment": reply_text,
+        "date": datetime.now().isoformat()
+    })
+    return_comment["replies"] = replies
+
+    target_step = workflow[returner_step_index]
+    current_step = int(target_step.get("step") or returner_step_index + 1)
+    for index, step in enumerate(workflow):
+        if index < returner_step_index:
+            step["status"] = step.get("status") or "approved"
+        else:
+            step["status"] = "pending" if index == returner_step_index else "waiting"
+
+    r.commentsHistory = comments
+    r.approvalSequence = workflow
+    r.currentStep = current_step
+    r.forwardedTo = target_step["approvers"]
+    r.routedTo = target_step["approvers"]
+    r.status = f"Pending with {target_step.get('role') or 'Head'}"
+    r.handledBy = []
+    r.votes = {}
+    r.updatedAt = datetime.now().isoformat()
+    flag_modified(r, "commentsHistory")
+    flag_modified(r, "approvalSequence")
+
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return {column: getattr(r, column) for column in r.__table__.columns.keys()}
+
 @app.put("/api/asset-requests/{request_id}")
 async def update_asset_request(request_id: str, request: AssetRequestCreate, authorization: str = Header(None), db: Session = Depends(get_db)):
     caller = get_caller(authorization, db)
@@ -1150,8 +1237,38 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     was_returned = r.status == "Returned"
         
     workflow = build_and_validate_workflow(request, db)
-    first_step = workflow[0]
-    initial_status = f"Pending with {first_step['role']}"
+    previous_workflow = list(r.approvalSequence) if r.approvalSequence else []
+    comments = list(r.commentsHistory) if r.commentsHistory else []
+    requester = db.query(models.User).filter(models.User.id == request.requestedBy).first()
+    reply_text = (request.returnReply or "").strip()
+    return_comment = None
+    target_step_index = 0
+    if was_returned and caller.id == r.requestedBy and reply_text:
+        if len(reply_text) > 1000:
+            raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
+        return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
+        if return_comment is not None:
+            try:
+                return_step_number = int(return_comment.get("step") or 0)
+            except (TypeError, ValueError):
+                return_step_number = 0
+            target_step_index = next(
+                (index for index, step in enumerate(workflow)
+                 if int(step.get("step") or index + 1) == return_step_number),
+                next((index for index, step in enumerate(workflow)
+                      if any(str(name).strip().lower() == str(return_comment.get("name") or "").strip().lower()
+                             for name in step.get("approvers", []))), 0)
+            )
+
+    target_step = workflow[target_step_index]
+    current_step = int(target_step.get("step") or target_step_index + 1)
+    initial_status = f"Pending with {target_step['role']}"
+    for index, step in enumerate(workflow):
+        if index < target_step_index and was_returned and reply_text:
+            previous_status = previous_workflow[index].get("status") if index < len(previous_workflow) else None
+            step["status"] = previous_status if previous_status in ("approved", "rejected", "returned") else "approved"
+        else:
+            step["status"] = "pending" if index == target_step_index else "waiting"
 
     item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
     if item and isinstance(item, str) and len(item) > 0:
@@ -1164,23 +1281,17 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     r.item = item
     r.category = request.assetType
     r.justification = justification
-    r.forwardedTo = first_step["approvers"]
-    r.routedTo = first_step["approvers"]
+    r.forwardedTo = target_step["approvers"]
+    r.routedTo = target_step["approvers"]
     r.approvalSequence = workflow
-    r.currentStep = 1
+    r.currentStep = current_step
     r.status = initial_status
     r.attachments = request.attachments or r.attachments
     r.handledBy = []
     r.votes = {}
     r.approverSelections = {}
     
-    comments = list(r.commentsHistory) if r.commentsHistory else []
-    requester = db.query(models.User).filter(models.User.id == request.requestedBy).first()
-    reply_text = (request.returnReply or "").strip()
     if was_returned and caller.id == r.requestedBy and reply_text:
-        if len(reply_text) > 1000:
-            raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
-        return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
         if return_comment is not None:
             replies = list(return_comment.get("replies") or [])
             user_role_label = 'MD' if is_md_user(caller) else ('Head' if is_head_user(caller) else (caller.role.capitalize() if caller.role else 'User'))
@@ -1198,7 +1309,7 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
         "comment": "Request edited and resubmitted.",
         "date": datetime.now().isoformat(),
         "action": "edit",
-        "step": 1
+        "step": current_step
     })
     r.commentsHistory = comments
     r.updatedAt = datetime.now().isoformat()

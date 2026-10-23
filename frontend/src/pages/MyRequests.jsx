@@ -227,12 +227,6 @@ const MyRequests = () => {
 
     if (isCurrentlyPendingWithMe) return r.status || '';
 
-    if (r.commentsHistory && r.commentsHistory.length > 0) {
-      const lastAction = r.commentsHistory[r.commentsHistory.length - 1];
-      if (lastAction.action === 'return' && r.requestedBy === currentUser?.id) {
-        return 'Returned';
-      }
-    }
     return r.status || '';
   };
 
@@ -318,6 +312,15 @@ const MyRequests = () => {
     } else if (action === 'edit') {
       setEditRequest(req);
       setIsNewRequestModalOpen(true);
+    } else if (action === 'reply') {
+      try {
+        const response = await api.post(`/asset-requests/${req.id}/reply`, { returnReply: remarks });
+        setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
+        setSelectedRequest(response.data);
+      } catch (error) {
+        console.error('Failed to send return reply:', error);
+        throw error;
+      }
     } else if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
@@ -343,6 +346,14 @@ const MyRequests = () => {
 
   const handleAddRequest = async (data) => {
     try {
+      if (data.replyOnly && editRequest) {
+        const response = await api.post(`/asset-requests/${editRequest.id}/reply`, { returnReply: data.returnReply });
+        setRequests(prev => prev.map(r => r.id === editRequest.id ? response.data : r));
+        setEditRequest(null);
+        setIsNewRequestModalOpen(false);
+        return;
+      }
+
       const selectedPerson = data.selectedReportingTo;
       const forwardTo = selectedPerson
         ? (Array.isArray(selectedPerson) ? selectedPerson : [selectedPerson])

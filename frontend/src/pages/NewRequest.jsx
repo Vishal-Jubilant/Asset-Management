@@ -126,6 +126,15 @@ const NewRequest = () => {
     } else if (action === 'edit') {
       setEditRequestForModal(req);
       setIsNewRequestModalOpen(true);
+    } else if (action === 'reply') {
+      try {
+        const response = await api.post(`/asset-requests/${req.id}/reply`, { returnReply: remarks });
+        setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
+        setSelectedRequestForModal(response.data);
+      } catch (error) {
+        console.error('Failed to send return reply:', error);
+        throw error;
+      }
     } else if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
@@ -156,6 +165,13 @@ const NewRequest = () => {
 
   const handleAddRequest = async (data) => {
     try {
+      if (data.replyOnly && editRequestForModal) {
+        const response = await api.post(`/asset-requests/${editRequestForModal.id}/reply`, { returnReply: data.returnReply });
+        setRequests(prev => prev.map(r => r.id === editRequestForModal.id ? response.data : r));
+        setEditRequestForModal(null);
+        return;
+      }
+
       const selectedPerson = data.selectedReportingTo;
       const forwardTo = selectedPerson
         ? (Array.isArray(selectedPerson) ? selectedPerson : [selectedPerson])
@@ -316,7 +332,8 @@ const NewRequest = () => {
                                   const details = getRequestNotificationDetails(req, user, getRequesterName(req.requestedBy));
                                   const label = details.type === 'new' ? 'New Request from' :
                                     details.type === 'forwarded' ? 'Forwarded Request from' :
-                                    details.type === 'returned' ? 'Returned Request from' : 'Updated Request from';
+                                    details.type === 'returned' ? 'Returned Request from' :
+                                    details.type === 'reply' ? 'Reply from' : 'Updated Request from';
                                   return <>{label} <span className="font-semibold text-brand-600 capitalize">{details.sender}</span></>;
                               })()}
                             </p>

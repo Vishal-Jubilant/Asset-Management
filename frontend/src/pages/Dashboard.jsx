@@ -599,7 +599,8 @@ const Dashboard = () => {
                                   const details = getRequestNotificationDetails(req, user, getRequesterName(req.requestedBy));
                                   const label = details.type === 'new' ? 'New Request from' :
                                     details.type === 'forwarded' ? 'Forwarded Request from' :
-                                    details.type === 'returned' ? 'Returned Request from' : 'Updated Request from';
+                                    details.type === 'returned' ? 'Returned Request from' :
+                                    details.type === 'reply' ? 'Reply from' : 'Updated Request from';
                                   return <>{label} <span className="font-semibold text-brand-600 capitalize">{details.sender}</span></>;
                                 })()}
                               </p>

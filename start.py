@@ -316,7 +316,7 @@ def main():
             else:
                 print("[OK] Admin user already exists.")
 
-        # Ensure ONLY default department 'Other' exists
+        # Ensure the special MD department is named 'Managing Directory'.
         legacy_depts = ["IT", "HR", "Finance"]
         for leg in legacy_depts:
             leg_row = db.query(models.Department).filter(models.Department.value == leg).first()
@@ -325,17 +325,27 @@ def main():
                 db.commit()
                 print(f"[-] Removed legacy default department '{leg}'.")
 
-        exist_other = db.query(models.Department).filter(
-            models.Department.value.ilike("Other")
+        managing_directory = db.query(models.Department).filter(
+            models.Department.value.ilike("Managing Directory")
         ).first()
-        if not exist_other:
-            db.add(models.Department(value="Other", label="Other"))
+        legacy_other_depts = db.query(models.Department).filter(
+            models.Department.value.ilike("Other")
+        ).all()
+        if not managing_directory and legacy_other_depts:
+            managing_directory = legacy_other_depts.pop(0)
+            managing_directory.value = "Managing Directory"
+            managing_directory.label = "Managing Directory"
+        elif not managing_directory:
+            db.add(models.Department(value="Managing Directory", label="Managing Directory"))
             db.commit()
-            print("[+] Department 'Other' created.")
-        elif exist_other.value != "Other":
-            exist_other.value = "Other"
-            exist_other.label = "Other"
-            db.commit()
+            print("[+] Department 'Managing Directory' created.")
+
+        db.query(models.User).filter(models.User.department.ilike("Other")).update(
+            {models.User.department: "Managing Directory"}, synchronize_session=False
+        )
+        for duplicate_department in legacy_other_depts:
+            db.delete(duplicate_department)
+        db.commit()
 
         # Clean up legacy dummy system accounts (keep ONLY Admin)
         dummy_users = db.query(models.User).filter(

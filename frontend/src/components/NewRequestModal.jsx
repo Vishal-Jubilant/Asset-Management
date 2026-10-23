@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
   X, Plus, Package, Paperclip, User, Shield,
   ChevronDown, CheckCircle2, Lock, Building2,
-  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, Check, ArrowRight
+  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, Check, ArrowRight, Send
 } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -39,6 +39,9 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const latestReturnCommentIndex = editRequest?.commentsHistory
     ?.map(comment => comment.action)
     .lastIndexOf('return') ?? -1;
+  const latestReturnComment = latestReturnCommentIndex >= 0
+    ? editRequest?.commentsHistory?.[latestReturnCommentIndex]
+    : null;
   const canReplyToReturn = isWorkflowLocked &&
     editRequest?.status === 'Returned' &&
     String(currentUser?.id) === String(editRequest?.requestedBy);
@@ -454,10 +457,10 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     let hasError = false;
     const validFiles = [];
     newFiles.forEach(f => {
-      if (f.size > 1024 * 1024) hasError = true;
+      if (f.size > 10 * 1024 * 1024) hasError = true;
       else validFiles.push(f);
     });
-    if (hasError) setFileError('One or more files exceed the 1MB limit and were skipped.');
+    if (hasError) setFileError('One or more files exceed the 10MB limit and were skipped.');
     setAttachedFiles(prev => [...prev, ...validFiles]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -478,6 +481,20 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     e.preventDefault();
     setValidationError('');
     setIsSubmitting(true);
+
+    if (canReplyToReturn && returnReply.trim()) {
+      try {
+        await onAdd({ replyOnly: true, returnReply: returnReply.trim() });
+        onClose();
+      } catch (err) {
+        console.error('Error sending return reply', err);
+        const serverMessage = err.response?.data?.detail;
+        setValidationError(typeof serverMessage === 'string' ? serverMessage : 'Failed to send reply. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     if (workflow.length === 0) {
       setValidationError('Please select at least one approver in the workflow.');
@@ -672,7 +689,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                 </div>
                 <div>
                   <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files or screenshots</p>
-                  <p className="text-[11px] text-slate-400">Up to 1MB per file</p>
+                  <p className="text-[11px] text-slate-400">Up to 10MB per file</p>
                 </div>
               </div>
               <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" multiple className="hidden" />
@@ -864,12 +881,12 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                           </span>
                         </div>
                         {c.replies?.map((reply, replyIndex) => (
-                          <div key={replyIndex} className="mt-2 ml-4 rounded-lg border border-emerald-100 bg-emerald-50/70 p-2.5">
+                          <div key={replyIndex} className="mt-2 ml-4 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
                             <div className="flex items-center justify-between mb-1">
                               <span className="font-semibold text-slate-800 text-[11px]">{reply.name} <span className="text-slate-500 font-normal ml-1">({reply.role})</span></span>
                               <span className="text-slate-400 text-[10px]">{new Date(reply.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
                             </div>
-                            <p className="text-slate-700 text-[12px]">{reply.comment}</p>
+                            <p className="text-slate-700 text-[12px]"><span className="font-semibold text-slate-500">Reply Comment:</span> {reply.comment}</p>
                           </div>
                         ))}
                         {isReplyTarget && (
@@ -920,10 +937,14 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
             >
               {isSubmitting ? (
                 <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : canReplyToReturn && returnReply.trim() ? (
+                <Send size={16} className="text-brand-100" />
               ) : (
                 <Plus size={16} className="text-brand-100" />
               )}
-              {editRequest ? 'Update Request' : 'Submit Request'}
+              {canReplyToReturn && returnReply.trim()
+                ? 'Send Reply'
+                : editRequest ? 'Update Request' : 'Submit Request'}
             </button>
           </div>
         </div>

@@ -70,13 +70,6 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
       }
     }
 
-    if (req.commentsHistory && req.commentsHistory.length > 0) {
-      const lastAction = req.commentsHistory[req.commentsHistory.length - 1];
-      if (lastAction.action === 'return' && req.requestedBy === currentUser?.id) {
-        return 'Returned';
-      }
-    }
-    
     return req.status;
   };
 

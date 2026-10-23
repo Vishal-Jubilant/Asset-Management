@@ -205,9 +205,9 @@ const ManageDepartments = () => {
             <label className="text-sm font-medium text-slate-700 block mb-2">Available Departments</label>
             <div className="flex flex-wrap items-start content-start gap-2.5 p-4 bg-slate-50 border border-slate-200 rounded-xl min-h-[120px]">
               {(() => {
-                const nonOther = (departments || []).filter(d => (d.value || '').trim().toLowerCase() !== 'other');
-                const other = (departments || []).filter(d => (d.value || '').trim().toLowerCase() === 'other');
-                const sortedDepts = [...nonOther, ...other];
+                const regularDepartments = (departments || []).filter(d => (d.value || '').trim().toLowerCase() !== 'managing directory');
+                const managingDirectory = (departments || []).filter(d => (d.value || '').trim().toLowerCase() === 'managing directory');
+                const sortedDepts = [...regularDepartments, ...managingDirectory];
 
                 return (
                   <>
