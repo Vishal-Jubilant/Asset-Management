@@ -5,6 +5,7 @@ import subprocess
 import socket
 import urllib.parse
 import re
+import importlib.util
 
 CERTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", "certs")
 CERT_FILE = os.path.join(CERTS_DIR, "cert.pem")
@@ -106,6 +107,13 @@ def generate_ssl_certs():
     if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
         return  # Already present
     os.makedirs(CERTS_DIR, exist_ok=True)
+    if importlib.util.find_spec("cryptography") is None:
+        requirements_file = os.path.join(BACKEND_DIR, "requirements.txt")
+        print("[+] Installing backend requirements needed to generate SSL certificates...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", requirements_file])
+        except subprocess.CalledProcessError as e:
+            print(f"[!] Could not install backend requirements: {e}")
     try:
         import ipaddress
         import datetime
