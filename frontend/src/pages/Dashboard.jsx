@@ -2,18 +2,11 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import { Package, CheckCircle, Bell, X, ChevronDown } from 'lucide-react';
 import { 
-  Package, Clock, CheckCircle, RotateCcw, ShieldAlert,
-  Plus, FileText, Search, BookOpen, ArrowRight, XCircle, Bell, X, Check, Calendar, ChevronDown
-} from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList, PieChart, Pie, Cell, AreaChart, Area, LineChart, Line
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell
 } from 'recharts';
 import { format, subDays, subWeeks, subMonths, startOfWeek, isSameDay, isSameWeek, isSameMonth } from 'date-fns';
-import StatCard from '../components/StatCard';
-import RequestTable from '../components/RequestTable';
-import Button from '../components/Button';
-import NewRequestModal from '../components/NewRequestModal';
 import { AppContext } from '../context/AppContext';
 import { formatNotificationDateTime, getRequestNotificationDetails } from '../utils/requestNotification';
 
@@ -687,7 +680,7 @@ const Dashboard = () => {
             </h2>
           </div>
           <div className="h-72 w-full mt-2 relative z-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" debounce={100}>
               <BarChart data={myCreatedData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }} barSize={28} barCategoryGap="35%">
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
@@ -727,7 +720,7 @@ const Dashboard = () => {
             </h2>
           </div>
           <div className="h-72 w-full mt-2 relative z-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" debounce={100}>
               <BarChart data={myReceivedData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }} barSize={28} barCategoryGap="35%">
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
@@ -832,7 +825,7 @@ const Dashboard = () => {
             {pieData.length > 0 ? (
               <div className="flex flex-col sm:flex-row items-center justify-center gap-8 w-full px-4">
                 <div className="relative w-56 h-56 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" debounce={100}>
                     <PieChart>
                       <Tooltip 
                         cursor={{ fill: 'rgba(59,130,246,0.04)' }}

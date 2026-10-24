@@ -25,14 +25,32 @@ const isMD = (u) =>
 
 const isSameApprover = (a, b) => {
   if (!a || !b) return false;
-  if (a.id && b.id) return a.id === b.id;
+
+  const normalizedId = value => {
+    if (value === null || value === undefined) return '';
+    return String(value).trim().toLowerCase();
+  };
+  const aIds = [a.id, a.approverId].map(normalizedId).filter(Boolean);
+  const bIds = [b.id, b.approverId].map(normalizedId).filter(Boolean);
+  const realAIds = aIds.filter(id => !id.startsWith('custom-'));
+  const realBIds = bIds.filter(id => !id.startsWith('custom-'));
+
+  if (realAIds.length > 0 && realBIds.length > 0 && realAIds.some(id => realBIds.includes(id))) {
+    return true;
+  }
+
   return (a.name || '').toLowerCase().trim() === (b.name || '').toLowerCase().trim();
 };
 
 /* ─── Main Modal ──────────────────────────────────────────── */
 const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const { currentUser, categories, users } = useContext(AppContext);
+  const isReturnedToRequester = Boolean(
+    editRequest?.status === 'Returned' &&
+    String(currentUser?.id) === String(editRequest?.requestedBy)
+  );
   const isWorkflowLocked = Boolean(
+    !isReturnedToRequester &&
     editRequest?.approvalSequence?.length &&
     editRequest.commentsHistory?.some(comment => comment.action === 'return')
   );
@@ -42,9 +60,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const latestReturnComment = latestReturnCommentIndex >= 0
     ? editRequest?.commentsHistory?.[latestReturnCommentIndex]
     : null;
-  const canReplyToReturn = isWorkflowLocked &&
-    editRequest?.status === 'Returned' &&
-    String(currentUser?.id) === String(editRequest?.requestedBy);
+  const canReplyToReturn = isReturnedToRequester &&
+    editRequest?.status === 'Returned';
 
   /* User context helpers */
   /* Approver data from backend */
@@ -347,6 +364,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           } else if (approverName) {
             reconstructed.push({
               id: `custom-${sIdx}`,
+              approverId: step?.approverId || step?.id || null,
               name: approverName,
               department: step?.department || (step?.role === 'MD' ? 'Management' : 'General'),
               role: step?.role || 'Head',
@@ -355,12 +373,16 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           }
         });
 
+        const uniqueWorkflow = reconstructed.filter((approver, index, list) =>
+          index === list.findIndex(candidate => isSameApprover(candidate, approver))
+        );
+
         // Ensure the default department head remains in the workflow.
-        if (!isWorkflowLocked && defaultHead && !reconstructed.some(a => (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
-          reconstructed.push({ ...defaultHead, isDefault: true });
+        if (!isWorkflowLocked && !isReturnedToRequester && defaultHead && !reconstructed.some(a => (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
+          uniqueWorkflow.push({ ...defaultHead, isDefault: true });
         }
 
-        setWorkflow(reconstructed);
+        setWorkflow(uniqueWorkflow);
         return;
       }
     }
@@ -406,8 +428,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
 
   const handleToggleApprover = (approver) => {
     if (!approver || isWorkflowLocked) return;
-    // Default department head cannot be deselected or removed
-    if (isApproverSameAsDefault(approver)) {
+    // Default department head remains locked for normal/new requests, but can be replaced after a return.
+    if (!isReturnedToRequester && isApproverSameAsDefault(approver)) {
       return;
     }
 
@@ -433,16 +455,17 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           ];
         }
 
-        // Other approvers retain selection order.
-        return [...prev, { ...approver, isDefault: false }];
+        // Other approvers retain selection order. Never add an existing approver twice.
+        const alreadySelected = prev.some(selected => isSameApprover(selected, approver));
+        return alreadySelected ? prev : [...prev, { ...approver, isDefault: false }];
       }
     });
   };
 
   const handleRemoveApprover = (approver) => {
     if (!approver || isWorkflowLocked) return;
-    // Default department head cannot be removed
-    if (approver.isDefault || isApproverSameAsDefault(approver)) {
+    // Default department head cannot be removed from normal/new requests.
+    if (!isReturnedToRequester && (approver.isDefault || isApproverSameAsDefault(approver))) {
       return;
     }
 
@@ -482,34 +505,24 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     setValidationError('');
     setIsSubmitting(true);
 
-    if (canReplyToReturn && returnReply.trim()) {
-      try {
-        await onAdd({ replyOnly: true, returnReply: returnReply.trim() });
-        onClose();
-      } catch (err) {
-        console.error('Error sending return reply', err);
-        const serverMessage = err.response?.data?.detail;
-        setValidationError(typeof serverMessage === 'string' ? serverMessage : 'Failed to send reply. Please try again.');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
     if (workflow.length === 0) {
       setValidationError('Please select at least one approver in the workflow.');
       setIsSubmitting(false);
       return;
     }
 
-    if (!isWorkflowLocked && defaultHead && !workflow.some(a => a.isDefault || (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
+    if (!isWorkflowLocked && !isReturnedToRequester && defaultHead && !workflow.some(a => a.isDefault || (a?.name || '').toLowerCase().trim() === (defaultHead.name || '').toLowerCase().trim())) {
       setValidationError('Your default department head must remain in the workflow.');
       setIsSubmitting(false);
       return;
     }
 
     // Build the formatted approvalSequence preserving exact selection order
-    const formattedSequence = workflow.map((a, idx) => ({
+    const uniqueWorkflow = workflow.filter((approver, index, list) =>
+      index === list.findIndex(candidate => isSameApprover(candidate, approver))
+    );
+
+    const formattedSequence = uniqueWorkflow.map((a, idx) => ({
       step: idx + 1,
       id: a.id,
       approverId: a.id,
@@ -519,7 +532,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       status: idx === 0 ? 'pending' : 'waiting'
     }));
 
-    const approverNames = workflow.map(a => a.name);
+    const approverNames = uniqueWorkflow.map(a => a.name);
 
     // Convert files
     const filePromises = attachedFiles.map(file =>
@@ -541,7 +554,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           selectedReportingTo: approverNames,
           selectedReportingRole: formattedSequence[0]?.role || 'Head',
           attachments: base64Files,
-          returnReply: canReplyToReturn ? returnReply.trim() : ''
+          returnReply: isReturnedToRequester ? returnReply.trim() : ''
         });
       }
       onClose();
@@ -716,7 +729,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                   Approval Workflow <span className="text-red-500">*</span>
                 </label>
                 <span className="text-[11px] text-slate-400 font-normal">
-                  {isWorkflowLocked ? 'Original workflow locked for resubmission' : defaultHead ? 'Own department head selected by default' : 'Select approvers'}
+                  {isWorkflowLocked ? 'Original workflow locked for resubmission' : isReturnedToRequester ? 'Change workflow before resubmission' : defaultHead ? 'Own department head selected by default' : 'Select approvers'}
                 </span>
               </div>
 
@@ -748,7 +761,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                             {stepNum}
                           </span>
                           <span className="truncate max-w-[140px]">{item.name}</span>
-                          {isDefault || isWorkflowLocked ? (
+                          {(isDefault && !isReturnedToRequester) || isWorkflowLocked ? (
                             <Lock size={11} className="text-brand-600 flex-shrink-0" title="Default Approver (Locked)" />
                           ) : (
                             <button
@@ -982,12 +995,12 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                     key={approver.id || approver.name}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      if (!isUserDefaultHead) {
+                      if (!isUserDefaultHead || isReturnedToRequester) {
                         handleToggleApprover(approver);
                       }
                     }}
                     className={`relative select-none py-2.5 pl-3.5 pr-12 transition-all text-sm mx-1 my-0.5 rounded-lg flex items-center justify-between ${
-                      isUserDefaultHead
+                      isUserDefaultHead && !isReturnedToRequester
                         ? 'bg-brand-50/60 text-brand-800 font-medium cursor-not-allowed'
                         : isSelected
                           ? 'bg-brand-50/80 text-brand-700 font-medium cursor-pointer'
@@ -1001,7 +1014,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                       </span>
                       {isUserDefaultHead && (
                         <span className="text-[10px] text-brand-600 bg-brand-100/70 border border-brand-200 px-1.5 py-0.2 rounded inline-flex items-center gap-1 font-semibold flex-shrink-0">
-                          <Lock size={10} /> Default{isSelected ? ` (Step ${stepNumber})` : ''}
+                          {!isReturnedToRequester && <Lock size={10} />} Default{isSelected ? ` (Step ${stepNumber})` : ''}
                         </span>
                       )}
                     </div>

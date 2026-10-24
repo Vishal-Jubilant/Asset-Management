@@ -1247,28 +1247,12 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
         if len(reply_text) > 1000:
             raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
         return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
-        if return_comment is not None:
-            try:
-                return_step_number = int(return_comment.get("step") or 0)
-            except (TypeError, ValueError):
-                return_step_number = 0
-            target_step_index = next(
-                (index for index, step in enumerate(workflow)
-                 if int(step.get("step") or index + 1) == return_step_number),
-                next((index for index, step in enumerate(workflow)
-                      if any(str(name).strip().lower() == str(return_comment.get("name") or "").strip().lower()
-                             for name in step.get("approvers", []))), 0)
-            )
 
     target_step = workflow[target_step_index]
     current_step = int(target_step.get("step") or target_step_index + 1)
     initial_status = f"Pending with {target_step['role']}"
     for index, step in enumerate(workflow):
-        if index < target_step_index and was_returned and reply_text:
-            previous_status = previous_workflow[index].get("status") if index < len(previous_workflow) else None
-            step["status"] = previous_status if previous_status in ("approved", "rejected", "returned") else "approved"
-        else:
-            step["status"] = "pending" if index == target_step_index else "waiting"
+        step["status"] = "pending" if index == target_step_index else "waiting"
 
     item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
     if item and isinstance(item, str) and len(item) > 0:
