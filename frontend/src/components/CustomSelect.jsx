@@ -18,38 +18,42 @@ const CustomSelect = ({ options, value, onChange, name, placeholder = 'Select an
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Close on scroll or resize so the portal menu does not drift
+  const updateMenuPosition = () => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const estimatedMenuHeight = Math.min(240, options.length * 40 + 16);
+    const openUpward =
+      menuPlacement === 'top' ||
+      (spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow);
+
+    setMenuStyle({
+      position: 'fixed',
+      width: rect.width,
+      left: rect.left,
+      zIndex: 99999,
+      ...(openUpward
+        ? { bottom: window.innerHeight - rect.top + 4, top: 'auto' }
+        : { top: rect.bottom + 4, bottom: 'auto' }),
+    });
+  };
+
+  // Keep the portal menu aligned with its trigger while a containing form scrolls.
   useEffect(() => {
     if (!isOpen) return;
-    const close = () => setIsOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    window.addEventListener('resize', updateMenuPosition);
     return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+      window.removeEventListener('resize', updateMenuPosition);
     };
-  }, [isOpen]);
+  }, [isOpen, menuPlacement, options.length]);
 
   const openMenu = () => {
     if (disabled) return;
     if (!isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      const estimatedMenuHeight = Math.min(240, options.length * 40 + 16);
-      const openUpward =
-        menuPlacement === 'top' ||
-        (spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow);
-
-      setMenuStyle({
-        position: 'fixed',
-        width: rect.width,
-        left: rect.left,
-        zIndex: 99999,
-        ...(openUpward
-          ? { bottom: window.innerHeight - rect.top + 4, top: 'auto' }
-          : { top: rect.bottom + 4, bottom: 'auto' }),
-      });
+      updateMenuPosition();
     }
     setIsOpen(prev => !prev);
   };

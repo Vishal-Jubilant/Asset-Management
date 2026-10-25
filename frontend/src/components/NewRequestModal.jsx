@@ -50,6 +50,11 @@ const getApproverRoleLabel = (approver) => {
   return `${department} ${role}`;
 };
 
+const keepMdApproversLast = (approvers) => [
+  ...approvers.filter(approver => !isMD(approver)),
+  ...approvers.filter(approver => isMD(approver))
+];
+
 /* ─── Main Modal ──────────────────────────────────────────── */
 const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const { currentUser, categories, users } = useContext(AppContext);
@@ -212,6 +217,23 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       }));
     }
 
+    // Keep newly created MD users visible even when the approver response was
+    // loaded before the shared users list was refreshed.
+    const knownApproverIds = new Set(
+      list.map(u => u?.id).filter(id => id !== null && id !== undefined).map(String)
+    );
+    const missingMdUsers = (users || [])
+      .filter(u => isMD(u) && !knownApproverIds.has(String(u.id)))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        department: u.department || 'Management',
+        role: 'MD',
+        departmentRole: u.departmentRole || 'MD',
+        empCode: u.empCode
+      }));
+    list = [...list, ...missingMdUsers];
+
     const currentUserDept = (currentUser?.department || '').trim().toLowerCase();
     const departmentUsers = (users || [])
       .filter(u =>
@@ -299,16 +321,16 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     if (isRequesterUser) {
       // Same-department users are selectable only while creating a new request.
       return canSelectSameDepartmentUsers
-        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads]
-        : [...currentDeptHeads, ...otherDeptHeads];
+        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads, ...mdApprovers]
+        : [...currentDeptHeads, ...otherDeptHeads, ...mdApprovers];
     }
 
     const isRequesterHead = isHead(currentUser);
     if (isRequesterHead) {
       // Same-department users are selectable only while creating a new request.
       return canSelectSameDepartmentUsers
-        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads]
-        : [...currentDeptHeads, ...otherDeptHeads];
+        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads, ...mdApprovers]
+        : [...currentDeptHeads, ...otherDeptHeads, ...mdApprovers];
     }
 
     // Default order for any other role
@@ -399,7 +421,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           uniqueWorkflow.push({ ...defaultHead, isDefault: true });
         }
 
-        setWorkflow(uniqueWorkflow);
+        setWorkflow(keepMdApproversLast(uniqueWorkflow));
         return;
       }
     }
@@ -455,7 +477,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
 
       if (existsIndex !== -1) {
         // Deselect: remove from workflow and recalculate sequence numbers without gaps
-        return prev.filter((a, idx) => idx !== existsIndex || a.isDefault);
+        return keepMdApproversLast(prev.filter((a, idx) => idx !== existsIndex || a.isDefault));
       } else {
         // Same-department users go before the locked default head in the sequence.
         const isSameDepartmentUser =
@@ -465,16 +487,18 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
             (currentUser?.department || '').trim().toLowerCase();
         const defaultHeadIndex = prev.findIndex(a => isApproverSameAsDefault(a));
         if (isSameDepartmentUser && defaultHeadIndex !== -1) {
-          return [
+          return keepMdApproversLast([
             ...prev.slice(0, defaultHeadIndex),
             { ...approver, isDefault: false },
             ...prev.slice(defaultHeadIndex)
-          ];
+          ]);
         }
 
         // Other approvers retain selection order. Never add an existing approver twice.
         const alreadySelected = prev.some(selected => isSameApprover(selected, approver));
-        return alreadySelected ? prev : [...prev, { ...approver, isDefault: false }];
+        return alreadySelected
+          ? keepMdApproversLast(prev)
+          : keepMdApproversLast([...prev, { ...approver, isDefault: false }]);
       }
     });
   };
@@ -486,7 +510,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       return;
     }
 
-    setWorkflow(prev => prev.filter(a => a.isDefault || !isSameApprover(a, approver)));
+    setWorkflow(prev => keepMdApproversLast(prev.filter(a => a.isDefault || !isSameApprover(a, approver))));
   };
 
   /* ── File handling ── */
