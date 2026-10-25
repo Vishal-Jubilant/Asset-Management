@@ -105,6 +105,7 @@ const NewRequest = () => {
     const handleClickOutside = (event) => {
       if (filterRef.current && !filterRef.current.contains(event.target)) {
         setIsFilterOpen(false);
+        filterRef.current.querySelector('button')?.blur();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -416,12 +417,17 @@ const NewRequest = () => {
             </button>
             <div className="relative" ref={filterRef}>
             <button 
-              onClick={() => setIsFilterOpen(!isFilterOpen)}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all ${
-                statusFilters.length > 0 
-                  ? 'bg-brand-50 border-brand-200 text-brand-700' 
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-              }`}
+              data-status-filter-button
+              data-status-filter-open={isFilterOpen ? 'true' : 'false'}
+              onClick={(event) => {
+                const shouldOpen = !isFilterOpen;
+                setIsFilterOpen(shouldOpen);
+                if (!shouldOpen) event.currentTarget.blur();
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all focus:outline-none bg-white text-slate-700 hover:bg-slate-50"
+              style={{
+                border: isFilterOpen ? '2px solid #c6eadc' : '1px solid #e2e8f0'
+              }}
             >
               Status
               {statusFilters.length > 0 && (
