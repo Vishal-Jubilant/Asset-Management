@@ -36,7 +36,7 @@ const SidebarLink = ({ link, onClick, className = '' }) => {
   const content = (
     <>
       <span className="flex h-10 w-20 flex-shrink-0 items-center justify-center">{link.icon}</span>
-      <span className={cn('truncate whitespace-nowrap transition-opacity', open ? 'opacity-100' : 'opacity-0')}>{link.label}</span>
+      <span className={cn('truncate whitespace-nowrap font-medium transition-opacity', open ? 'opacity-100' : 'opacity-0')}>{link.label}</span>
     </>
   );
 
