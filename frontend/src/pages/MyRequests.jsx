@@ -305,7 +305,7 @@ const MyRequests = () => {
     },
   ];
 
-  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole, selectedWorkflowApprovers) => {
     if (action === 'viewDetailsModal' || action === 'view') {
       setSelectedRequest(req);
       setIsModalOpen(true);
@@ -317,6 +317,7 @@ const MyRequests = () => {
         const response = await api.post(`/asset-requests/${req.id}/reply`, { returnReply: remarks });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
         setSelectedRequest(response.data);
+        return response.data;
       } catch (error) {
         console.error('Failed to send return reply:', error);
         throw error;
@@ -328,11 +329,15 @@ const MyRequests = () => {
           remarks: remarks,
           selectedApprovers: selectedApprovers,
           selectedReportingRole: selectedReportingRole,
+          selectedWorkflowApprovers: selectedWorkflowApprovers,
           userId: currentUser?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
+        setSelectedRequest(response.data);
+        return response.data;
       } catch (error) {
         console.error("Action failed", error);
+        throw error;
       }
     } else if (action === 'delete') {
       try {

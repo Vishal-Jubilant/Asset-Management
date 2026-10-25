@@ -1,8 +1,8 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
   User, Hash, Monitor, AlertCircle, Paperclip, Download, Shield,
-  ArrowRight, Send
+  ArrowRight, Send, ChevronDown, Lock, Plus
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
@@ -61,6 +61,9 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const [validationError, setValidationError] = useState('');
   const [returnReply, setReturnReply] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isWorkflowMenuOpen, setIsWorkflowMenuOpen] = useState(false);
+  const [selectedWorkflowApprovers, setSelectedWorkflowApprovers] = useState([]);
+  const workflowScrollerRef = useRef(null);
   
   useEffect(() => {
     if (isOpen && request) {
@@ -73,6 +76,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       setValidationError('');
       setReturnReply('');
       setIsSendingReply(false);
+      setIsWorkflowMenuOpen(false);
+      setSelectedWorkflowApprovers([]);
     }
   }, [isOpen, request]);
   
@@ -86,6 +91,17 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       document.body.style.overflow = 'unset';
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && workflowScrollerRef.current) {
+      workflowScrollerRef.current.scrollLeft = 0;
+    }
+  }, [
+    isOpen,
+    request?.id,
+    request?.currentStep,
+    request?.approvalSequence?.length
+  ]);
   
   if (!isOpen || !request) return null;
 
@@ -158,8 +174,29 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   })();
 
   const showActions = isApprover && !hasVoted && !isHandled && !isRequester;
+  const canAddWorkflowHead = Boolean(
+    request.status?.includes('Pending') &&
+    !isRequester &&
+    !hasVoted &&
+    !isHandled &&
+    isApprover
+  );
+  const workflowHeadNames = new Set(
+    (request.approvalSequence || []).flatMap(step => (step.approvers || []).map(approver => {
+      const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+      return name.trim().toLowerCase();
+    }))
+  );
+  const workflowHeads = users.filter(user => {
+    const role = `${user.role || ''} ${user.departmentRole || ''}`.toLowerCase();
+    return user.status !== 'Inactive' && role.includes('head');
+  });
+  const availableWorkflowHeads = workflowHeads.filter(head =>
+    !workflowHeadNames.has(head.name.trim().toLowerCase()) &&
+    String(head.id) !== currentUserId
+  );
 
-  const handleActionClick = (actionStr) => {
+  const handleActionClick = async (actionStr) => {
     if (actionStr === 'return') {
       if (!newComment.trim()) {
         setValidationError('Please add a comment before returning for edits.');
@@ -171,7 +208,15 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       }
     }
     if (onAction) {
-      onAction(actionStr, request, newComment, actionStr === 'return' ? [returnTarget] : selectedApprovers, selectedReportingRole);
+      setIsApproving(actionStr === 'approve');
+      await onAction(
+        actionStr,
+        request,
+        newComment,
+        actionStr === 'return' ? [returnTarget] : selectedApprovers,
+        selectedReportingRole,
+        selectedWorkflowApprovers
+      );
       onClose();
     }
   };
@@ -526,23 +571,102 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <Shield size={14} className="text-blue-600" />
                   Approval Status Workflow
                 </h3>
-                <span
-                  className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
-                    request.status === 'Approved'
-                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                      : request.status === 'Rejected'
-                      ? 'text-rose-700 bg-rose-50 border-rose-200'
-                      : request.status === 'Returned'
-                      ? 'text-amber-700 bg-amber-50 border-amber-200'
-                      : 'text-slate-500 bg-white border-slate-200'
-                  }`}
-                >
-                  Step {request.status === 'Approved' ? request.approvalSequence.length : (request.currentStep || 1)} of {request.approvalSequence.length}
-                  {request.status === 'Returned' ? ' • Returned' : request.status === 'Approved' ? ' • Approved' : request.status === 'Rejected' ? ' • Rejected' : ''}
-                </span>
+                <div className="relative flex items-center gap-2">
+                  <span
+                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
+                      request.status === 'Approved'
+                        ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                        : request.status === 'Rejected'
+                        ? 'text-rose-700 bg-rose-50 border-rose-200'
+                        : request.status === 'Returned'
+                        ? 'text-amber-700 bg-amber-50 border-amber-200'
+                        : 'text-slate-500 bg-white border-slate-200'
+                    }`}
+                  >
+                    Step {request.status === 'Approved' ? request.approvalSequence.length : (request.currentStep || 1)} of {request.approvalSequence.length}
+                    {request.status === 'Returned' ? ' • Returned' : request.status === 'Approved' ? ' • Approved' : request.status === 'Rejected' ? ' • Rejected' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsWorkflowMenuOpen(prev => !prev)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700"
+                    aria-expanded={isWorkflowMenuOpen}
+                  >
+                    Add Workflow
+                    <ChevronDown size={13} className={isWorkflowMenuOpen ? 'rotate-180' : ''} />
+                  </button>
+                  {isWorkflowMenuOpen && (
+                    <div className="absolute right-0 top-8 z-30 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                      <div className="mb-1 flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <Lock size={11} /> Locked after creation
+                      </div>
+                      <div className="space-y-1">
+                      {workflowHeads.map(head => {
+                        const isSelected = request.approvalSequence.some(step =>
+                          (step.approvers || []).some(approver => {
+                            const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+                            return name.trim().toLowerCase() === head.name.trim().toLowerCase();
+                          })
+                        );
+                        const queuedIndex = selectedWorkflowApprovers.findIndex(
+                          item => String(item.id) === String(head.id)
+                        );
+                        const isQueued = queuedIndex !== -1;
+                        return (
+                          <button
+                            key={head.id}
+                            type="button"
+                            disabled={isSelected || !canAddWorkflowHead}
+                            onClick={() => {
+                              if (!isSelected && canAddWorkflowHead) {
+                                setSelectedWorkflowApprovers(prev => isQueued
+                                  ? prev.filter(item => String(item.id) !== String(head.id))
+                                  : [...prev, { id: head.id, name: head.name }]
+                                );
+                              }
+                            }}
+                            className={`flex min-h-9 w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] leading-5 text-left transition-colors ${
+                              isSelected ? 'bg-blue-50 text-blue-700' :
+                              isQueued ? 'bg-emerald-50 text-emerald-700' :
+                              canAddWorkflowHead ? 'text-slate-700 hover:bg-slate-50' : 'text-slate-400'
+                            }`}
+                          >
+                            <span className="min-w-0 truncate font-medium">
+                              {head.name}
+                              <span className="ml-1 text-[11px] font-normal text-slate-500">
+                                ({head.department || 'Department'})
+                              </span>
+                            </span>
+                            {isSelected ? (
+                              <Lock size={11} className="text-blue-600" />
+                            ) : isQueued ? (
+                              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white shadow-sm">
+                                {queuedIndex + 1}
+                              </span>
+                            ) : (
+                              <Plus size={11} />
+                            )}
+                          </button>
+                        );
+                      })}
+                      </div>
+                      {availableWorkflowHeads.length === 0 && (
+                        <p className="px-2 py-1 text-[11px] text-slate-400">All Department Heads are already in this workflow.</p>
+                      )}
+                      {selectedWorkflowApprovers.length > 0 && (
+                        <p className="mt-1 border-t border-slate-100 px-2 pt-2 text-[10px] text-emerald-700">
+                          Your department head is added first, then selected heads from other departments.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+              <div
+                ref={workflowScrollerRef}
+                className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full"
+              >
                 <React.Fragment key="requester">
                   <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] px-1">
                     <div className="relative">
@@ -783,6 +907,23 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         </div>
                         <div className={`mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[10px] ${action === 'return' ? 'mb-2 border-b border-amber-200/70 pb-2' : ''}`}>
                           <span className={`font-semibold uppercase ${statusColor}`}>{statusLabel}</span>
+                          {Array.isArray(entry.addedFlow) && entry.addedFlow.length > 0 && (
+                            <span className="ml-auto text-right text-[11px] text-slate-500">
+                              <span className="font-semibold text-emerald-700">Added Flow:</span>{' '}
+                              {entry.addedFlow.map((flow, flowIndex) => {
+                                const department = flow.department || 'General';
+                                const role = flow.role || 'User';
+                                return (
+                                  <React.Fragment key={`${flow.name}-${flowIndex}`}>
+                                    {flowIndex > 0 && ', '}
+                                    <span className="font-medium text-slate-700">
+                                      {flow.name} ({department} {role})
+                                    </span>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </span>
+                          )}
                           {action === 'return' && entry.sentToStr && (
                             <span className="text-right text-slate-500"><span className="font-semibold uppercase">Returned to:</span> <span className="font-medium text-slate-700">{entry.sentToStr}</span></span>
                           )}

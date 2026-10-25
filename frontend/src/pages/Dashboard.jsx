@@ -280,7 +280,7 @@ const Dashboard = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole, selectedWorkflowApprovers) => {
     if (['approve', 'reject', 'return'].includes(action)) {
       try {
         const response = await api.put(`/asset-requests/${req.id}/action`, {
@@ -288,11 +288,14 @@ const Dashboard = () => {
           remarks: remarks,
           selectedApprovers: selectedApprovers,
           selectedReportingRole: selectedReportingRole,
+          selectedWorkflowApprovers: selectedWorkflowApprovers,
           userId: user?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
+        return response.data;
       } catch (error) {
         console.error("Action failed", error);
+        throw error;
       }
     }
   };
@@ -680,7 +683,7 @@ const Dashboard = () => {
             </h2>
           </div>
           <div className="h-72 w-full mt-2 relative z-0">
-            <ResponsiveContainer width="100%" height="100%" debounce={100}>
+            <ResponsiveContainer width="100%" height="100%" debounce={150}>
               <BarChart data={myCreatedData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }} barSize={28} barCategoryGap="35%">
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
@@ -702,10 +705,10 @@ const Dashboard = () => {
                   labelStyle={{ fontSize: '14px', marginBottom: '4px', fontWeight: 'bold' }}
                 />
                 <Legend verticalAlign="bottom" wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }} iconType="circle" />
-                <Bar dataKey="Approved" stackId="a" fill="#005400" shape={(props) => <CustomBarShape {...props} dataKey="Approved" />} />
-                <Bar dataKey="Pending" stackId="a" fill="#007816" shape={(props) => <CustomBarShape {...props} dataKey="Pending" />} />
-                <Bar dataKey="Returned" stackId="a" fill="#009E3B" shape={(props) => <CustomBarShape {...props} dataKey="Returned" />} />
-                <Bar dataKey="Rejected" stackId="a" fill="#22C55E" shape={(props) => <CustomBarShape {...props} dataKey="Rejected" />} />
+                <Bar isAnimationActive={false} dataKey="Approved" stackId="a" fill="#005400" shape={(props) => <CustomBarShape {...props} dataKey="Approved" />} />
+                <Bar isAnimationActive={false} dataKey="Pending" stackId="a" fill="#007816" shape={(props) => <CustomBarShape {...props} dataKey="Pending" />} />
+                <Bar isAnimationActive={false} dataKey="Returned" stackId="a" fill="#009E3B" shape={(props) => <CustomBarShape {...props} dataKey="Returned" />} />
+                <Bar isAnimationActive={false} dataKey="Rejected" stackId="a" fill="#22C55E" shape={(props) => <CustomBarShape {...props} dataKey="Rejected" />} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -720,7 +723,7 @@ const Dashboard = () => {
             </h2>
           </div>
           <div className="h-72 w-full mt-2 relative z-0">
-            <ResponsiveContainer width="100%" height="100%" debounce={100}>
+            <ResponsiveContainer width="100%" height="100%" debounce={150}>
               <BarChart data={myReceivedData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }} barSize={28} barCategoryGap="35%">
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
@@ -742,10 +745,10 @@ const Dashboard = () => {
                   labelStyle={{ fontSize: '14px', marginBottom: '4px', fontWeight: 'bold' }}
                 />
                 <Legend verticalAlign="bottom" wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }} iconType="circle" />
-                <Bar dataKey="Approved" stackId="a" fill="#005400" shape={(props) => <CustomBarShape {...props} dataKey="Approved" />} />
-                <Bar dataKey="Pending" stackId="a" fill="#007816" shape={(props) => <CustomBarShape {...props} dataKey="Pending" />} />
-                <Bar dataKey="Returned" stackId="a" fill="#009E3B" shape={(props) => <CustomBarShape {...props} dataKey="Returned" />} />
-                <Bar dataKey="Rejected" stackId="a" fill="#22C55E" shape={(props) => <CustomBarShape {...props} dataKey="Rejected" />} />
+                <Bar isAnimationActive={false} dataKey="Approved" stackId="a" fill="#005400" shape={(props) => <CustomBarShape {...props} dataKey="Approved" />} />
+                <Bar isAnimationActive={false} dataKey="Pending" stackId="a" fill="#007816" shape={(props) => <CustomBarShape {...props} dataKey="Pending" />} />
+                <Bar isAnimationActive={false} dataKey="Returned" stackId="a" fill="#009E3B" shape={(props) => <CustomBarShape {...props} dataKey="Returned" />} />
+                <Bar isAnimationActive={false} dataKey="Rejected" stackId="a" fill="#22C55E" shape={(props) => <CustomBarShape {...props} dataKey="Rejected" />} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -825,7 +828,7 @@ const Dashboard = () => {
             {pieData.length > 0 ? (
               <div className="flex flex-col sm:flex-row items-center justify-center gap-8 w-full px-4">
                 <div className="relative w-56 h-56 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%" debounce={100}>
+                  <ResponsiveContainer width="100%" height="100%" debounce={150}>
                     <PieChart>
                       <Tooltip 
                         cursor={{ fill: 'rgba(59,130,246,0.04)' }}
@@ -833,6 +836,7 @@ const Dashboard = () => {
                         itemStyle={{ fontSize: '13px', fontWeight: 'bold' }}
                       />
                       <Pie
+                        isAnimationActive={false}
                         data={pieData}
                         innerRadius={65}
                         outerRadius={95}
@@ -896,4 +900,4 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard;
+export default React.memo(Dashboard);

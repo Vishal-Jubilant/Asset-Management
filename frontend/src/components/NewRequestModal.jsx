@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
   X, Plus, Package, Paperclip, User, Shield,
   ChevronDown, CheckCircle2, Lock, Building2,
-  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, Check, ArrowRight, Send
+  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send
 } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -42,6 +42,14 @@ const isSameApprover = (a, b) => {
   return (a.name || '').toLowerCase().trim() === (b.name || '').toLowerCase().trim();
 };
 
+const getApproverRoleLabel = (approver) => {
+  if (!approver) return 'General Head';
+  const department = (approver.department || 'General').trim();
+  const rawRole = (approver.role || approver.departmentRole || 'Head').trim();
+  const role = rawRole.charAt(0).toUpperCase() + rawRole.slice(1).toLowerCase();
+  return `${department} ${role}`;
+};
+
 /* ─── Main Modal ──────────────────────────────────────────── */
 const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const { currentUser, categories, users } = useContext(AppContext);
@@ -51,8 +59,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   );
   const isWorkflowLocked = Boolean(
     !isReturnedToRequester &&
-    editRequest?.approvalSequence?.length &&
-    editRequest.commentsHistory?.some(comment => comment.action === 'return')
+    editRequest?.approvalSequence?.length
   );
   const latestReturnCommentIndex = editRequest?.commentsHistory
     ?.map(comment => comment.action)
@@ -151,15 +158,14 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Close on scroll or resize so portal menu does not drift
+  // Keep the portal dropdown open while its own list is being scrolled.
+  // Reposition only when the viewport changes.
   useEffect(() => {
     if (!isDeptDropdownOpen) return;
-    const close = () => setIsDeptDropdownOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    const reposition = () => updateDropdownPosition(false);
+    window.addEventListener('resize', reposition);
     return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('resize', reposition);
     };
   }, [isDeptDropdownOpen]);
 
@@ -223,7 +229,14 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
         departmentRole: u.departmentRole,
         empCode: u.empCode
       }));
-    list = [...list, ...departmentUsers];
+    const isUserOrHeadRequester =
+      !isMD(currentUser) &&
+      (isHead(currentUser) || (currentUser?.role || '').toLowerCase() === 'user');
+    const canSelectSameDepartmentUsers = !editRequest && isUserOrHeadRequester;
+
+    if (canSelectSameDepartmentUsers) {
+      list = [...list, ...departmentUsers];
+    }
 
     // Exclude requester from eligible approvers (cannot approve own request)
     // Strictly match by ID if IDs exist, so that an MD sharing the same username as a regular user (e.g. JC0033 User vs JC0033 MD) is NOT erroneously excluded
@@ -284,19 +297,23 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     }
 
     if (isRequesterUser) {
-      // Default department Head, own-department employees, other Heads, then MDs.
-      return [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads, ...mdApprovers];
+      // Same-department users are selectable only while creating a new request.
+      return canSelectSameDepartmentUsers
+        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads]
+        : [...currentDeptHeads, ...otherDeptHeads];
     }
 
     const isRequesterHead = isHead(currentUser);
     if (isRequesterHead) {
-      // Department Head requests start with eligible people from their own department.
-      return [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads, ...mdApprovers];
+      // Same-department users are selectable only while creating a new request.
+      return canSelectSameDepartmentUsers
+        ? [...currentDeptHeads, ...currentDeptUsers, ...otherDeptHeads]
+        : [...currentDeptHeads, ...otherDeptHeads];
     }
 
     // Default order for any other role
     return [...currentDeptHeads, ...otherDeptHeads, ...mdApprovers];
-  }, [approverData, users, currentUser]);
+  }, [approverData, users, currentUser, editRequest]);
 
   const defaultHead = useMemo(() => {
     const isCurrentHead = isHead(currentUser);
@@ -856,7 +873,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                                     {item.name}
                                   </span>
                                   <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                                    {item.role === 'MD' ? 'MD' : `${item.department || 'General'} ${item.role || 'Head'}`}
+                                    {getApproverRoleLabel(item)}
                                   </span>
                                 </div>
                               </div>
@@ -986,9 +1003,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                 const selectedIndex = workflow.findIndex(s => isSameApprover(s, approver));
                 const isSelected = selectedIndex !== -1;
                 const stepNumber = isSelected ? selectedIndex + 1 : null;
-                const approverRoleLabel = approver.role === 'MD'
-                  ? 'MD'
-                  : `${approver.department || 'General'} ${approver.role || 'Head'}`;
+                const approverRoleLabel = getApproverRoleLabel(approver);
 
                 return (
                   <li
@@ -1020,9 +1035,10 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                     </div>
 
                     {isSelected && (
-                      <span className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-brand-600 gap-1 font-semibold text-xs">
-                        <span>{stepNumber}</span>
-                        <Check size={16} />
+                      <span className="absolute inset-y-0 right-0 flex items-center pr-3.5">
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white shadow-sm">
+                          {stepNumber}
+                        </span>
                       </span>
                     )}
                   </li>

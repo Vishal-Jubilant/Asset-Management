@@ -1,16 +1,63 @@
-import React, { useContext, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { createContext, useContext, useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
-import {
-  Sidebar as AceternitySidebar,
-  SidebarBody,
-  SidebarLink,
-  useSidebar,
-} from './ui/sidebar';
-import { 
-  LayoutDashboard, FilePlus, List, LogOut, Settings, Users, ChevronLeft, ChevronRight 
-} from 'lucide-react';
+import { LayoutDashboard, FilePlus, List, LogOut, Settings, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const SidebarContext = createContext(null);
+
+const useSidebar = () => {
+  const context = useContext(SidebarContext);
+  if (!context) {
+    throw new Error('useSidebar must be used within a Sidebar provider');
+  }
+  return context;
+};
+
+const SidebarBody = ({ children, className = '', ...props }) => {
+  const { open } = useSidebar();
+
+  return (
+    <aside
+      {...props}
+      className={cn(
+        'fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r border-slate-200 bg-white shadow-sm transition-[width] duration-300 ease-in-out',
+        className
+      )}
+      style={{ width: open ? '320px' : '80px' }}
+    >
+      {children}
+    </aside>
+  );
+};
+
+const SidebarLink = ({ link, onClick, className = '' }) => {
+  const { open } = useSidebar();
+  const content = (
+    <>
+      <span className="flex h-10 w-20 flex-shrink-0 items-center justify-center">{link.icon}</span>
+      <span className={cn('truncate whitespace-nowrap transition-opacity', open ? 'opacity-100' : 'opacity-0')}>{link.label}</span>
+    </>
+  );
+
+  if (onClick || !link.path) {
+    return <button type="button" onClick={onClick} className={cn('flex h-12 w-full items-center text-left', className)}>{content}</button>;
+  }
+
+  return (
+    <NavLink
+      to={link.path}
+      end={link.path === '/app'}
+      className={({ isActive }) => cn(
+        'flex h-12 w-full items-center',
+        isActive ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50',
+        className
+      )}
+    >
+      {content}
+    </NavLink>
+  );
+};
 
 const SidebarContent = ({ isCollapsed, setIsCollapsed, isHovered, setIsHovered, handleMouseEnter, handleMouseLeave }) => {
   const { open } = useSidebar();
@@ -35,16 +82,13 @@ const SidebarContent = ({ isCollapsed, setIsCollapsed, isHovered, setIsHovered, 
       onMouseLeave={handleMouseLeave}
     >
       {/* Header with Fixed 80px Logo Anchor & Toggle Button */}
-      <div className="pt-6 lg:pt-8 pb-4 flex items-center justify-between w-full relative">
+      <div className="pt-5 pb-3 flex items-center justify-between w-full relative min-h-[76px]">
         <div className="flex items-center min-w-0">
           {/* Permanent 80px Logo Slot - never shifts, rock-solid 40px center */}
           <div className="w-20 flex-shrink-0 flex items-center justify-center">
             <button
               type="button"
-              onClick={() => {
-                setIsCollapsed(!isCollapsed);
-                if (setIsHovered) setIsHovered(false);
-              }}
+              onClick={() => setIsHovered(false)}
               className="w-11 h-11 flex items-center justify-center rounded-xl transition-all cursor-pointer hover:bg-slate-100 hover:scale-105"
               title={isCollapsed ? "Click to expand sidebar" : "Click to collapse sidebar"}
             >
@@ -63,26 +107,12 @@ const SidebarContent = ({ isCollapsed, setIsCollapsed, isHovered, setIsHovered, 
           </div>
         </div>
 
-        {/* Desktop Collapse / Expand Toggle Button */}
-        {open && (
-          <button
-            type="button"
-            onClick={() => {
-              setIsCollapsed(!isCollapsed);
-              if (setIsHovered) setIsHovered(false);
-            }}
-            className="hidden md:flex items-center justify-center p-1.5 mr-3 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0"
-            title={isCollapsed ? "Pin sidebar open" : "Collapse sidebar"}
-          >
-            {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-          </button>
-        )}
       </div>
 
       {/* Scrollable Navigation Area */}
       <div className="flex-1 py-2 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300 flex flex-col">
         {/* Menu Label (preserved height) */}
-        <div className="h-6 flex items-center px-6 mb-3 overflow-hidden">
+        <div className="h-6 flex items-center px-6 mb-2 overflow-hidden">
           <span
             className={cn(
               "text-xs font-bold text-slate-400 uppercase tracking-widest select-none transition-all duration-200",
@@ -165,7 +195,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isHovered: isHoveredProp, setIsH
   };
 
   return (
-    <AceternitySidebar open={open} setOpen={(val) => setIsCollapsed(!val)} animate={false}>
+    <SidebarContext.Provider value={{ open }}>
       <SidebarContent 
         isCollapsed={isCollapsed} 
         setIsCollapsed={setIsCollapsed} 
@@ -174,7 +204,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed, isHovered: isHoveredProp, setIsH
         handleMouseEnter={handleMouseEnter}
         handleMouseLeave={handleMouseLeave}
       />
-    </AceternitySidebar>
+    </SidebarContext.Provider>
   );
 };
 

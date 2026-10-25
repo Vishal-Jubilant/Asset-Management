@@ -89,6 +89,7 @@ class ActionRequest(BaseModel):
     remarks: Optional[str] = ""
     selectedApprovers: Optional[Any] = None
     selectedReportingRole: Optional[str] = None
+    selectedWorkflowApprovers: Optional[List[Any]] = None
     userId: int  # The user making the action
 
 class ReturnReplyRequest(BaseModel):
@@ -947,6 +948,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
     active_approver_names = []
     active_approver_ids = []
     workflow = list(r.approvalSequence) if r.approvalSequence else []
+    added_flow = []
     cur_step = r.currentStep or 1
     cur_idx = cur_step - 1
 
@@ -973,6 +975,202 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
 
     if not is_active_approver:
         raise HTTPException(status_code=403, detail="Unauthorized: You are not an assigned approver for this active step.")
+
+    if payload.action == 'approve' and payload.selectedWorkflowApprovers and workflow:
+        all_users = db.query(models.User).filter(models.User.status == 'Active').all()
+        existing_names = {
+            str(name).strip().lower()
+            for step in workflow
+            for name in (step.get("approvers") or [])
+        }
+        additions = []
+        for candidate in payload.selectedWorkflowApprovers:
+            candidate_id = candidate.get("id") if isinstance(candidate, dict) else None
+            candidate_name = (
+                candidate.get("name") if isinstance(candidate, dict)
+                else str(candidate)
+            )
+            target = next((
+                item for item in all_users
+                if (candidate_id is not None and str(item.id) == str(candidate_id))
+                or (candidate_name and item.name.strip().lower() == str(candidate_name).strip().lower())
+            ), None)
+            if not target or not is_head_user(target):
+                raise HTTPException(status_code=400, detail="Only active Department Heads can be added to the workflow.")
+            if target.name.strip().lower() in existing_names:
+                continue
+            if target.id == user.id:
+                raise HTTPException(status_code=400, detail="The current approver cannot be added again.")
+            additions.append(target)
+            existing_names.add(target.name.strip().lower())
+
+        # Newly selected heads are the next approval step. Preserve the
+        # requester's department priority before continuing with existing
+        # workflow steps from other departments.
+        requester = db.query(models.User).filter(models.User.id == r.requestedBy).first()
+        requester_department = (requester.department or "").strip().lower() if requester else ""
+
+        # Keep existing workflow steps in their original order. If the
+        # requester's department head is missing, add it before newly selected
+        # heads; otherwise insert newly selected heads immediately after it.
+        own_department_head = None
+        existing_own_head_step = None
+        own_head_index = None
+        is_own_department_head_action = False
+        if requester and requester_department:
+            reporting_to = requester.reportingTo or ""
+            reporting_names = {
+                str(name).strip().lower()
+                for name in (reporting_to if isinstance(reporting_to, list) else str(reporting_to).split(","))
+                if str(name).strip()
+            }
+            own_department_head = next(
+                (
+                    candidate for candidate in all_users
+                    if candidate.id != requester.id
+                    and candidate.id != user.id
+                    and is_head_user(candidate)
+                    and (candidate.department or "").strip().lower() == requester_department
+                    and candidate.name.strip().lower() in reporting_names
+                ),
+                next(
+                    (
+                        candidate for candidate in all_users
+                        if candidate.id != requester.id
+                        and candidate.id != user.id
+                        and is_head_user(candidate)
+                        and (candidate.department or "").strip().lower() == requester_department
+                    ),
+                    None,
+                ),
+            )
+
+            if own_department_head:
+                active_step = workflow[cur_idx] if 0 <= cur_idx < len(workflow) else {}
+                active_step_department = (active_step.get("department") or "").strip().lower()
+                is_own_department_head_action = (
+                    is_head_user(user)
+                    and (user.department or "").strip().lower() == requester_department
+                    and (
+                        user.id == own_department_head.id
+                        or active_step_department == requester_department
+                    )
+                )
+                own_head_name = own_department_head.name.strip().lower()
+                additions = [
+                    target for target in additions
+                    if target.name.strip().lower() != own_head_name
+                ]
+                existing_own_head_step = next(
+                    (
+                        step for step in workflow
+                        if own_head_name in {
+                            str(name).strip().lower()
+                            for name in (step.get("approvers") or [])
+                        }
+                    ),
+                    None,
+                )
+                if existing_own_head_step:
+                    own_head_index = workflow.index(existing_own_head_step)
+                else:
+                    existing_own_head_step = {
+                        "step": 0,
+                        "id": own_department_head.id,
+                        "approverId": own_department_head.id,
+                        "approverIds": [own_department_head.id],
+                        "role": "Head",
+                        "department": own_department_head.department,
+                        "approvers": [own_department_head.name],
+                        "status": "waiting"
+                    }
+                    additions.insert(0, own_department_head)
+
+        if (
+            requester
+            and is_head_user(user)
+            and (user.department or "").strip().lower() == requester_department
+        ):
+            is_own_department_head_action = True
+
+        # Normalize previously added heads as well. This prevents a later
+        # approval from leaving an approval-time addition before the own
+        # department head because the workflow was saved by an older version.
+        if own_head_index is not None:
+            approval_added_steps = []
+            for step in workflow:
+                if step is existing_own_head_step:
+                    continue
+                if step.get("addedDuringApproval"):
+                    approval_added_steps.append(step)
+
+            if approval_added_steps:
+                workflow = [
+                    step for step in workflow
+                    if step not in approval_added_steps
+                ]
+                own_head_index = next(
+                    index for index, step in enumerate(workflow)
+                    if step is existing_own_head_step
+                )
+                workflow[own_head_index + 1:own_head_index + 1] = (
+                    approval_added_steps
+                )
+                own_head_index += len(approval_added_steps)
+
+        additions.sort(
+            key=lambda target: (
+                (target.department or "").strip().lower() != requester_department,
+            )
+        )
+        if is_own_department_head_action:
+            # The own-department head has priority over every later step:
+            # heads selected here must be the immediate next approvers.
+            insert_at = cur_idx + 1
+        else:
+            insert_anchor = cur_idx
+            if own_head_index is not None:
+                insert_anchor = max(insert_anchor, own_head_index)
+            while (
+                insert_anchor + 1 < len(workflow)
+                and workflow[insert_anchor + 1].get("addedDuringApproval")
+            ):
+                insert_anchor += 1
+            insert_at = insert_anchor + 1
+        for target in additions:
+            existing_step = None
+            if own_department_head and target.id == own_department_head.id:
+                existing_step = existing_own_head_step
+            step_to_insert = existing_step or {
+                "step": 0,
+                "id": target.id,
+                "approverId": target.id,
+                "approverIds": [target.id],
+                "role": "Head",
+                "department": target.department,
+                "approvers": [target.name],
+                "status": "waiting",
+                "addedDuringApproval": True
+            }
+            if existing_step is not None:
+                step_to_insert["addedDuringApproval"] = True
+            workflow.insert(insert_at, step_to_insert)
+            insert_at += 1
+
+        added_flow = [
+            {
+                "name": target.name,
+                "department": target.department or "General",
+                "role": "Head" if is_head_user(target) else (target.role or "User")
+            }
+            for target in additions
+        ]
+
+        for index, step in enumerate(workflow, start=1):
+            step["step"] = index
+
+        r.approvalSequence = workflow
+        flag_modified(r, "approvalSequence")
 
     handledBy = list(r.handledBy) if r.handledBy else []
     votes = dict(r.votes) if r.votes else {}
@@ -1117,6 +1315,8 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
     }
     if return_target_name:
         comment_entry["sentToStr"] = return_target_name
+    if added_flow:
+        comment_entry["addedFlow"] = added_flow
     commentsHistory.append(comment_entry)
 
     r.status = newStatus

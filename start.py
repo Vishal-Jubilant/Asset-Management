@@ -184,7 +184,7 @@ def main():
         except (FileNotFoundError, OSError, ValueError):
             in_venv = os.path.normcase(sys.executable) == os.path.normcase(os.path.abspath(python_exe))
 
-    if not in_venv:
+    if not in_venv and not os.environ.get("ASSET_MANAGEMENT_VENV_HANDOFF"):
         if not os.path.exists(python_exe):
             print("=" * 40)
             print("       CLIENT MANAGEMENT SYSTEM")
@@ -193,7 +193,12 @@ def main():
             print("ERROR: Python virtual environment not found in backend/venv.")
             sys.exit(1)
         try:
-            sys.exit(subprocess.call([python_exe, os.path.abspath(__file__)] + sys.argv[1:]))
+            handoff_env = os.environ.copy()
+            handoff_env["ASSET_MANAGEMENT_VENV_HANDOFF"] = "1"
+            sys.exit(subprocess.call(
+                [python_exe, os.path.abspath(__file__)] + sys.argv[1:],
+                env=handoff_env
+            ))
         except KeyboardInterrupt:
             sys.exit(0)
 

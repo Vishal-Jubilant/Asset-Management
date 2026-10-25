@@ -117,7 +117,7 @@ const NewRequest = () => {
       prev.includes(option) ? prev.filter(f => f !== option) : [...prev, option]
     );
   };
-  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole) => {
+  const handleAction = async (action, req, remarks, selectedApprovers, selectedReportingRole, selectedWorkflowApprovers) => {
     if (action === 'delete') {
       setRequestToDelete(req);
     } else if (action === 'viewDetailsModal' || action === 'view') {
@@ -131,6 +131,7 @@ const NewRequest = () => {
         const response = await api.post(`/asset-requests/${req.id}/reply`, { returnReply: remarks });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
         setSelectedRequestForModal(response.data);
+        return response.data;
       } catch (error) {
         console.error('Failed to send return reply:', error);
         throw error;
@@ -142,11 +143,14 @@ const NewRequest = () => {
           remarks: remarks,
           selectedApprovers: selectedApprovers,
           selectedReportingRole: selectedReportingRole,
+          selectedWorkflowApprovers: selectedWorkflowApprovers,
           userId: user?.id
         });
         setRequests(prev => prev.map(r => r.id === req.id ? response.data : r));
+        setSelectedRequestForModal(response.data);
       } catch (error) {
         console.error("Action failed", error);
+        throw error;
       }
     }
   };
@@ -204,10 +208,9 @@ const NewRequest = () => {
     }
   };
   const myOwnRequests = (requests || []).filter(r => r && r.requestedBy === currentUser?.id);
-  const requestsForSection = [
-    ...myOwnRequests,
-    ...pendingRequestsForMe.filter(req => !myOwnRequests.some(ownRequest => ownRequest.id === req.id))
-  ];
+  // The New Request page lists only requests created by the current user.
+  // Requests assigned for approval are shown in My Requests instead.
+  const requestsForSection = myOwnRequests;
 
   const filterOptions = ['Approved', 'Pending', 'Returned', 'Rejected'];
   if (myOwnRequests.some(r => r.status === 'Hold')) {
