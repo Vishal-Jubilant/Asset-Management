@@ -9,6 +9,7 @@ import NewRequestModal from '../components/NewRequestModal';
 import RequestDetailsModal from '../components/RequestDetailsModal';
 import { AppContext } from '../context/AppContext';
 import { formatNotificationDateTime, getRequestNotificationDetails } from '../utils/requestNotification';
+import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
 
 const NewRequest = () => {
   const navigate = useNavigate();
@@ -232,17 +233,20 @@ const NewRequest = () => {
   ];
 
   const filteredRequests = requestsForSection.filter(r => {
-    const matchesSearch = r?.id?.toString()?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
+    const matchesSearch =
+      r?.id?.toString()?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       r?.item?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       r?.category?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       r?.status?.toLowerCase()?.includes(searchQuery.toLowerCase());
-      
+
     if (statusFilters.length === 0) return matchesSearch;
-    
-    const matchesFilter = statusFilters.some(f => 
-      f === 'Pending' ? r.status?.includes('Pending') : r.status === f
+
+    // Use the shared utility — same function RequestTable uses for badges — so filter always matches display
+    const tableStatus = getRequestDisplayStatus(r, currentUser);
+    const matchesFilter = statusFilters.some(f =>
+      f === 'Pending' ? tableStatus?.includes('Pending') : tableStatus === f
     );
-    
+
     return matchesSearch && matchesFilter;
   });
 

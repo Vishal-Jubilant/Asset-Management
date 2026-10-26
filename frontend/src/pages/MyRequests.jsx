@@ -11,6 +11,7 @@ import {
   parseDate,
   getLocalTimeZone,
 } from "@internationalized/date";
+import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
 
 const MyRequests = () => {
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
@@ -394,9 +395,8 @@ const MyRequests = () => {
   };
 
   const filteredRequests = myRequests.filter(r => {
-    const displayStatus = (() => {
-      return getDisplayStatus(r);
-    })();
+    // Use the shared utility — same function RequestTable uses for badges — so filter always matches display
+    const tableStatus = getRequestDisplayStatus(r, currentUser);
 
     const matchesSearch = !searchQuery ? true : (() => {
       const lowerQuery = searchQuery.toLowerCase();
@@ -430,8 +430,9 @@ const MyRequests = () => {
       return true;
     })();
 
-    const matchesFilter = statusFilters.length === 0 ? true : statusFilters.some(f => 
-      f === 'Pending' ? displayStatus.includes('Pending') : displayStatus === f
+    // Filter by what the badge actually shows — if selected filter is Pending, only show Pending badges etc.
+    const matchesFilter = statusFilters.length === 0 ? true : statusFilters.some(f =>
+      f === 'Pending' ? tableStatus?.includes('Pending') : tableStatus === f
     );
     
     return matchesSearch && matchesFilter && matchesDate;

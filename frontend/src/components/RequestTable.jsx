@@ -3,6 +3,7 @@ import { AppContext } from '../context/AppContext';
 import StatusBadge from './StatusBadge';
 import Button from './Button';
 import { Eye, Check, X, CornerUpLeft, MessageSquare, FileText, ChevronLeft, ChevronRight, Trash2, Clock, CheckCircle, XCircle, RotateCcw, Edit2 } from 'lucide-react';
+import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
 
 const RequestTable = ({ requests, role, variant, onAction }) => {
   const { currentUser } = useContext(AppContext);
@@ -24,54 +25,8 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
     }).format(amount);
   };
 
-  const getDisplayStatus = (req) => {
-    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
-    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-    let isCurrentlyPendingWithMe = false;
-    if (req.status?.includes('Pending')) {
-      if (req.approvalSequence && req.approvalSequence.length > 0) {
-        const curStepIdx = (req.currentStep || 1) - 1;
-        const curStep = req.approvalSequence[curStepIdx];
-        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
-          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
-          isCurrentlyPendingWithMe = isMDStep || (curStep.approvers || []).some(n => {
-            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-          });
-        }
-      } else if (req.status === `Pending with ${roleName}` || (req.status === 'Pending with MD' && isMD)) {
-        if (!req.forwardedTo || req.forwardedTo.length === 0) {
-          isCurrentlyPendingWithMe = true;
-        } else {
-          isCurrentlyPendingWithMe = (Array.isArray(req.forwardedTo) ? req.forwardedTo : [req.forwardedTo]).some(n => {
-            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-          }) || (req.status === 'Pending with MD' && isMD);
-        }
-      }
-      
-      // If I already voted, it's not pending for me anymore
-      if (req.handledBy && req.handledBy.includes(currentUser?.id)) {
-        isCurrentlyPendingWithMe = false;
-      }
-    }
-
-    if (isCurrentlyPendingWithMe) return req.status;
-
-    if (req.requestedBy !== currentUser?.id) {
-      const myLastAction = [...(req.commentsHistory || [])].reverse().find(c =>
-        (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
-        ['approve', 'reject', 'return'].includes(c.action)
-      );
-      if (myLastAction) {
-        if (myLastAction.action === 'approve') return 'Approved';
-        if (myLastAction.action === 'reject') return 'Rejected';
-        if (myLastAction.action === 'return') return 'Returned';
-      }
-    }
-
-    return req.status;
-  };
+  // Use the shared utility so the badge is always consistent with the filter logic in page components
+  const getDisplayStatus = (req) => getRequestDisplayStatus(req, currentUser);
 
   const getActions = (req) => {
     if (role === 'incharge') {
