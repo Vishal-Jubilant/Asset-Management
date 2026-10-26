@@ -10,7 +10,9 @@ const keyPath = path.join(certsDir, 'key.pem')
 const certPath = path.join(certsDir, 'cert.pem')
 
 const getHttpsConfig = () => {
-  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) return undefined
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    throw new Error(`[SSL] Missing certificate files. Expected ${certPath} and ${keyPath}.`)
+  }
 
   try {
     const key = crypto.createPrivateKey(fs.readFileSync(keyPath))
@@ -21,8 +23,7 @@ const getHttpsConfig = () => {
     const certificateDer = certificate.publicKey.export({ type: 'spki', format: 'der' })
 
     if (!keyDer.equals(certificateDer)) {
-      console.warn('[SSL] Certificate and private key do not match. Running Vite over HTTP.')
-      return undefined
+      throw new Error('[SSL] Certificate and private key do not match.')
     }
 
     return {
@@ -30,8 +31,7 @@ const getHttpsConfig = () => {
       cert: fs.readFileSync(certPath),
     }
   } catch (error) {
-    console.warn(`[SSL] Invalid certificate configuration. Running Vite over HTTP: ${error.message}`)
-    return undefined
+    throw new Error(`[SSL] Invalid certificate configuration: ${error.message}`)
   }
 }
 

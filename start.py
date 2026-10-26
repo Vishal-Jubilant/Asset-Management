@@ -233,10 +233,11 @@ def main():
     print("STEP 1b: Checking SSL Certificates...")
     generate_ssl_certs()
     ssl_available = os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE)
-    if ssl_available:
-        print("[OK] SSL certificates found.")
-    else:
-        print("[!] SSL certificates not available. Running in HTTP mode.")
+    if not ssl_available:
+        print("[!] SSL certificates could not be created.")
+        print("    HTTPS is required. Install backend requirements and try again.")
+        sys.exit(1)
+    print("[OK] SSL certificates found. HTTPS-only mode enabled.")
 
     print("STEP 2: Verifying Database Credentials...")
     db_url = get_db_url()
@@ -417,7 +418,7 @@ def main():
     backend_running = is_port_in_use(4000, host=local_ip)
     frontend_running = is_port_in_use(4001, host=local_ip)
 
-    protocol = "https" if ssl_available else "http"
+    protocol = "https"
     print("=" * 40)
     print("APPLICATION STARTING...")
     print("=" * 40)
@@ -425,7 +426,7 @@ def main():
     print("Database: Connected")
     print("Schema:   Validated")
     print(f"Frontend: {'Already Running' if frontend_running else 'Starting...'}")
-    print(f"SSL:      {'Enabled (HTTPS)' if ssl_available else 'Disabled (HTTP)'}")
+    print("SSL:      Enabled (HTTPS-only)")
     print(f"\nFrontend URL: {protocol}://localhost:4001  (Network: {protocol}://{local_ip}:4001)")
     print(f"Backend URL:  {protocol}://localhost:4000  (Network: {protocol}://{local_ip}:4000)")
     if ssl_available:
@@ -441,8 +442,7 @@ def main():
 
     if not backend_running:
         backend_cmd = [python_exe, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "4000"]
-        if ssl_available:
-            backend_cmd += ["--ssl-keyfile", KEY_FILE, "--ssl-certfile", CERT_FILE]
+        backend_cmd += ["--ssl-keyfile", KEY_FILE, "--ssl-certfile", CERT_FILE]
         backend_process = subprocess.Popen(
             backend_cmd,
             cwd=BACKEND_DIR,
