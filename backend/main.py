@@ -780,6 +780,21 @@ def build_and_validate_workflow(request: AssetRequestCreate, db: Session):
                 })
                 step_counter += 1
 
+        # MD must always be the final approver when included in the workflow.
+        md_steps = [
+            step for step in workflow
+            if step.get("role", "").strip().lower() == "md"
+        ]
+        if md_steps:
+            workflow = [
+                step for step in workflow
+                if step.get("role", "").strip().lower() != "md"
+            ] + md_steps
+
+            for index, step in enumerate(workflow, start=1):
+                step["step"] = index
+                step["status"] = "pending" if index == 1 else "waiting"
+
         # Ensure at least one approver in workflow
         if len(workflow) == 0:
             raise HTTPException(status_code=400, detail="The approval sequence must contain at least one approver.")
@@ -995,8 +1010,8 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
                 if (candidate_id is not None and str(item.id) == str(candidate_id))
                 or (candidate_name and item.name.strip().lower() == str(candidate_name).strip().lower())
             ), None)
-            if not target or not is_head_user(target):
-                raise HTTPException(status_code=400, detail="Only active Department Heads can be added to the workflow.")
+            if not target or not (is_head_user(target) or is_md_user(target)):
+                raise HTTPException(status_code=400, detail="Only active Department Heads or the Managing Director can be added to the workflow.")
             if target.name.strip().lower() in existing_names:
                 continue
             if target.id == user.id:
@@ -1120,6 +1135,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
 
         additions.sort(
             key=lambda target: (
+                is_md_user(target),
                 (target.department or "").strip().lower() != requester_department,
             )
         )
@@ -1146,8 +1162,8 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
                 "id": target.id,
                 "approverId": target.id,
                 "approverIds": [target.id],
-                "role": "Head",
-                "department": target.department,
+                "role": "MD" if is_md_user(target) else "Head",
+                "department": None if is_md_user(target) else target.department,
                 "approvers": [target.name],
                 "status": "waiting",
                 "addedDuringApproval": True
@@ -1161,10 +1177,20 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
             {
                 "name": target.name,
                 "department": target.department or "General",
-                "role": "Head" if is_head_user(target) else (target.role or "User")
+                "role": "MD" if is_md_user(target) else "Head"
             }
             for target in additions
         ]
+
+        md_steps = [
+            step for step in workflow
+            if step.get("role", "").strip().lower() == "md"
+        ]
+        if md_steps:
+            workflow = [
+                step for step in workflow
+                if step.get("role", "").strip().lower() != "md"
+            ] + md_steps
 
         for index, step in enumerate(workflow, start=1):
             step["step"] = index

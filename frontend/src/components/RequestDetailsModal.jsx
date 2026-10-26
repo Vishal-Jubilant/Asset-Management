@@ -64,6 +64,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const [isWorkflowMenuOpen, setIsWorkflowMenuOpen] = useState(false);
   const [selectedWorkflowApprovers, setSelectedWorkflowApprovers] = useState([]);
   const workflowScrollerRef = useRef(null);
+  const workflowMenuRef = useRef(null);
   
   useEffect(() => {
     if (isOpen && request) {
@@ -102,6 +103,19 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
     request?.currentStep,
     request?.approvalSequence?.length
   ]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (workflowMenuRef.current && !workflowMenuRef.current.contains(event.target)) {
+        setIsWorkflowMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideClick);
+    };
+  }, []);
   
   if (!isOpen || !request) return null;
 
@@ -187,14 +201,61 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       return name.trim().toLowerCase();
     }))
   );
+  const isManagingDirector = (user) =>
+    user?.role?.toLowerCase() === 'md' ||
+    user?.departmentRole?.toLowerCase() === 'md' ||
+    user?.empCode?.toLowerCase() === 'md' ||
+    user?.name?.toLowerCase() === 'managing director';
   const workflowHeads = users.filter(user => {
     const role = `${user.role || ''} ${user.departmentRole || ''}`.toLowerCase();
-    return user.status !== 'Inactive' && role.includes('head');
+    return user.status !== 'Inactive' && (role.includes('head') || isManagingDirector(user));
   });
   const availableWorkflowHeads = workflowHeads.filter(head =>
     !workflowHeadNames.has(head.name.trim().toLowerCase()) &&
     String(head.id) !== currentUserId
   );
+  const workflowSequenceNames = (request.approvalSequence || []).flatMap(step =>
+    (step.approvers || []).map(approver => {
+      const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+      return name.trim().toLowerCase();
+    })
+  );
+  const queuedWorkflowNames = selectedWorkflowApprovers.map(item => item.name.trim().toLowerCase());
+  const orderedSelectedWorkflowApprovers = [...selectedWorkflowApprovers].sort((a, b) => {
+    const aUser = workflowHeads.find(user => String(user.id) === String(a.id));
+    const bUser = workflowHeads.find(user => String(user.id) === String(b.id));
+    return Number(isManagingDirector(aUser)) - Number(isManagingDirector(bUser));
+  });
+  const workflowHeadDisplayOrder = [...workflowHeads].sort((a, b) => {
+    const aName = a.name.trim().toLowerCase();
+    const bName = b.name.trim().toLowerCase();
+    const isSameDepartment = (head) =>
+      head.department && currentUser?.department &&
+      head.department.trim().toLowerCase() === currentUser.department.trim().toLowerCase();
+    const aIsSameDepartment = isSameDepartment(a);
+    const bIsSameDepartment = isSameDepartment(b);
+    const aIsSelected = workflowHeadNames.has(aName) || queuedWorkflowNames.includes(aName);
+    const bIsSelected = workflowHeadNames.has(bName) || queuedWorkflowNames.includes(bName);
+    const aIsMD = isManagingDirector(a);
+    const bIsMD = isManagingDirector(b);
+
+    const getGroup = (isSameDept, isSelected, isMD) =>
+      isMD ? 3 : isSameDept ? 0 : isSelected ? 1 : 2;
+    const groupDifference = getGroup(aIsSameDepartment, aIsSelected, aIsMD) -
+      getGroup(bIsSameDepartment, bIsSelected, bIsMD);
+    if (groupDifference !== 0) return groupDifference;
+
+    if (aIsSelected && bIsSelected) {
+      const aSequenceIndex = workflowSequenceNames.indexOf(aName);
+      const bSequenceIndex = workflowSequenceNames.indexOf(bName);
+      if (aSequenceIndex !== bSequenceIndex) {
+        return (aSequenceIndex === -1 ? Number.MAX_SAFE_INTEGER : aSequenceIndex) -
+          (bSequenceIndex === -1 ? Number.MAX_SAFE_INTEGER : bSequenceIndex);
+      }
+    }
+
+    return workflowHeads.indexOf(a) - workflowHeads.indexOf(b);
+  });
 
   const handleActionClick = async (actionStr) => {
     if (actionStr === 'return') {
@@ -215,7 +276,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         newComment,
         actionStr === 'return' ? [returnTarget] : selectedApprovers,
         selectedReportingRole,
-        selectedWorkflowApprovers
+        orderedSelectedWorkflowApprovers
       );
       onClose();
     }
@@ -571,7 +632,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <Shield size={14} className="text-blue-600" />
                   Approval Status Workflow
                 </h3>
-                <div className="relative flex items-center gap-2">
+                <div ref={workflowMenuRef} className="relative flex items-center gap-2">
                   <span
                     className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
                       request.status === 'Approved'
@@ -592,7 +653,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700"
                     aria-expanded={isWorkflowMenuOpen}
                   >
-                    Add Workflow
+                    Edit Workflow
                     <ChevronDown size={13} className={isWorkflowMenuOpen ? 'rotate-180' : ''} />
                   </button>
                   {isWorkflowMenuOpen && (
@@ -601,14 +662,14 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         <Lock size={11} /> Locked after creation
                       </div>
                       <div className="space-y-1">
-                      {workflowHeads.map(head => {
+                      {workflowHeadDisplayOrder.map(head => {
                         const isSelected = request.approvalSequence.some(step =>
                           (step.approvers || []).some(approver => {
                             const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
                             return name.trim().toLowerCase() === head.name.trim().toLowerCase();
                           })
                         );
-                        const queuedIndex = selectedWorkflowApprovers.findIndex(
+                        const queuedIndex = orderedSelectedWorkflowApprovers.findIndex(
                           item => String(item.id) === String(head.id)
                         );
                         const isQueued = queuedIndex !== -1;
@@ -634,7 +695,9 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                             <span className="min-w-0 truncate font-medium">
                               {head.name}
                               <span className="ml-1 text-[11px] font-normal text-slate-500">
-                                ({head.department || 'Department'})
+                                ({isManagingDirector(head)
+                                  ? 'MD'
+                                  : `${head.department || 'Department'} Head`})
                               </span>
                             </span>
                             {isSelected ? (
