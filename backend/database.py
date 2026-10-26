@@ -1,15 +1,8 @@
-import os
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Load credentials from backend/.env (never committed to git)
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
-
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://postgres:password@localhost/client_management"  # fallback placeholder
-)
+# Format: postgresql://user:password@host:port/dbname
+SQLALCHEMY_DATABASE_URL = "postgresql+psycopg2://postgres:Ardent%40123@localhost/client_management"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -21,3 +14,4 @@ def get_db():
         yield db
     finally:
         db.close()
+
