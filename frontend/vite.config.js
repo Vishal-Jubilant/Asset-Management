@@ -3,9 +3,13 @@ import crypto from 'crypto'
 import { defineConfig } from 'vite'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'node:url'
+
+// Compatible __dirname for ESM (works on all Node.js versions, unlike import.meta.dirname)
+const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 // Resolve certificate paths relative to this config file
-const certsDir = path.resolve(import.meta.dirname, '../backend/certs')
+const certsDir = path.resolve(__dirname, '../backend/certs')
 const keyPath = path.join(certsDir, 'key.pem')
 const certPath = path.join(certsDir, 'cert.pem')
 
@@ -42,7 +46,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(import.meta.dirname, './src'),
+      '@': path.resolve(__dirname, './src'),
     },
   },
   server: {
