@@ -230,6 +230,23 @@ def main():
     print("\nSTEP 1: Checking Virtual Environment...")
     # (Passed successfully since we are in the venv)
 
+    print("STEP 1a: Pulling latest code from Git...")
+    try:
+        git_result = subprocess.run(
+            ["git", "pull"],
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if git_result.returncode == 0:
+            output = git_result.stdout.strip()
+            print(f"[OK] Git: {output if output else 'Already up to date.'}")
+        else:
+            print(f"[!] Git pull failed (continuing anyway): {git_result.stderr.strip()}")
+    except Exception as e:
+        print(f"[!] Could not run git pull (continuing anyway): {e}")
+
     print("STEP 1b: Checking SSL Certificates...")
     generate_ssl_certs()
     ssl_available = os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE)
@@ -450,9 +467,8 @@ def main():
         )
     if not frontend_running:
         npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-        if not os.path.exists(os.path.join(FRONTEND_DIR, "node_modules")):
-            print("[+] frontend/node_modules not found. Installing frontend dependencies...")
-            subprocess.run([npm_cmd, "install"], cwd=FRONTEND_DIR)
+        print("[+] Installing/updating frontend dependencies...")
+        subprocess.run([npm_cmd, "install"], cwd=FRONTEND_DIR)
         frontend_process = subprocess.Popen(
             [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "4001"],
             cwd=FRONTEND_DIR,
