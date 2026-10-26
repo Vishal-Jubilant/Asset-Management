@@ -36,7 +36,7 @@ const SidebarLink = ({ link, onClick, className = '' }) => {
   const content = (
     <>
       <span className="flex h-10 w-20 flex-shrink-0 items-center justify-center">{link.icon}</span>
-      <span className={cn('truncate whitespace-nowrap font-medium transition-opacity', open ? 'opacity-100' : 'opacity-0')}>{link.label}</span>
+      <span className={cn('truncate whitespace-nowrap text-lg font-medium transition-opacity', open ? 'opacity-100' : 'opacity-0')}>{link.label}</span>
     </>
   );
 
@@ -124,7 +124,7 @@ const SidebarContent = ({ isCollapsed, setIsCollapsed, isHovered, setIsHovered, 
         </div>
 
         {/* Links List with spacing */}
-        <div className="space-y-2.5 w-full">
+        <div className="space-y-0 w-full">
           {links.map((link, idx) => (
             <SidebarLink key={idx} link={link} />
           ))}
