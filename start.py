@@ -103,9 +103,30 @@ def stop_process(proc):
         pass
 
 def generate_ssl_certs():
-    """Auto-generate a self-signed certificate valid for 10 years if one doesn't exist."""
+    """Create a usable self-signed certificate and matching private key."""
     if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
-        return  # Already present
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.primitives import serialization
+
+            with open(CERT_FILE, 'rb') as cert_file:
+                certificate = x509.load_pem_x509_certificate(cert_file.read())
+            with open(KEY_FILE, 'rb') as key_file:
+                private_key = serialization.load_pem_private_key(key_file.read(), password=None)
+
+            certificate_public_key = certificate.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            private_key_public_key = private_key.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            if certificate_public_key == private_key_public_key:
+                return
+            print("[!] SSL certificate and private key do not match. Regenerating both files...")
+        except Exception as error:
+            print(f"[!] Existing SSL files are invalid ({error}). Regenerating both files...")
     os.makedirs(CERTS_DIR, exist_ok=True)
     if importlib.util.find_spec("cryptography") is None:
         requirements_file = os.path.join(BACKEND_DIR, "requirements.txt")
