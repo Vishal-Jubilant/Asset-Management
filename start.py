@@ -230,22 +230,6 @@ def main():
     print("\nSTEP 1: Checking Virtual Environment...")
     # (Passed successfully since we are in the venv)
 
-    print("STEP 1a: Pulling latest code from Git...")
-    try:
-        git_result = subprocess.run(
-            ["git", "pull"],
-            cwd=BASE_DIR,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if git_result.returncode == 0:
-            output = git_result.stdout.strip()
-            print(f"[OK] Git: {output if output else 'Already up to date.'}")
-        else:
-            print(f"[!] Git pull failed (continuing anyway): {git_result.stderr.strip()}")
-    except Exception as e:
-        print(f"[!] Could not run git pull (continuing anyway): {e}")
 
     print("STEP 1b: Checking SSL Certificates...")
     generate_ssl_certs()
