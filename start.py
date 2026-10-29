@@ -48,15 +48,32 @@ def is_port_in_use(port, host=None):
     return False
 
 def get_db_url():
+    candidates = []
+    if os.getenv("DATABASE_URL"):
+        candidates.append(os.getenv("DATABASE_URL"))
     try:
         with open(os.path.join(BACKEND_DIR, "database.py"), "r") as f:
             content = f.read()
         match = re.search(r'SQLALCHEMY_DATABASE_URL\s*=\s*["\']([^"\']+)["\']', content)
         if match:
-            return match.group(1)
+            candidates.append(match.group(1))
     except Exception:
         pass
-    return None
+
+    candidates.extend([
+        "postgresql+psycopg2://postgres:Ardent%40123@localhost/client_management",
+        "postgresql+psycopg2://postgres:1234@localhost/client_management",
+    ])
+
+    import sqlalchemy
+    for url in candidates:
+        try:
+            test_eng = sqlalchemy.create_engine(url)
+            with test_eng.connect():
+                return url
+        except Exception:
+            continue
+    return candidates[0] if candidates else None
 
 def repair_venv_if_needed(venv_path):
     pyvenv_cfg = os.path.join(venv_path, "pyvenv.cfg")
