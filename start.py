@@ -175,6 +175,7 @@ def generate_ssl_certs():
         san_list = [
             x509.DNSName('localhost'),
             x509.DNSName('paperless'),
+            x509.DNSName('paperless.ardentcapital.in'),
             x509.DNSName(hostname),
             x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
             x509.IPAddress(ipaddress.IPv4Address('172.16.1.65')),
