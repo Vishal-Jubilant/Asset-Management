@@ -70,8 +70,6 @@ class UserCreate(BaseModel):
     password: Optional[str] = "password123"
 
 
-
-
 class AssetRequestCreate(BaseModel):
     assetType: str
     otherAssetType: Optional[str] = ""

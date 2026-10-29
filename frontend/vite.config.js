@@ -50,13 +50,27 @@ export default defineConfig({
 		},
 	},
 	server: {
-		allowedHosts: ['paperless', 'localhost', '115.245.23.187'],
+		allowedHosts: true,
 		https: httpsConfig,
+		proxy: {
+			'/api': {
+				target: 'https://127.0.0.1:4000',
+				changeOrigin: true,
+				secure: false,
+			},
+		},
 	},
 	preview: {
 		port: 4001,
-		allowedHosts: ['paperless', 'localhost', '115.245.23.187'],
+		allowedHosts: true,
 		https: httpsConfig,
+		proxy: {
+			'/api': {
+				target: 'https://127.0.0.1:4000',
+				changeOrigin: true,
+				secure: false,
+			},
+		},
 	},
 	build: {
 		rollupOptions: {

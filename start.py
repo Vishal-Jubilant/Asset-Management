@@ -160,9 +160,14 @@ def generate_ssl_certs():
             x509.DNSName('paperless'),
             x509.DNSName(hostname),
             x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
+            x509.IPAddress(ipaddress.IPv4Address('172.16.1.65')),
+            x509.IPAddress(ipaddress.IPv4Address('115.245.23.187')),
         ]
-        if local_ip != '127.0.0.1':
-            san_list.append(x509.IPAddress(ipaddress.IPv4Address(local_ip)))
+        if local_ip not in ['127.0.0.1', '172.16.1.65', '115.245.23.187']:
+            try:
+                san_list.append(x509.IPAddress(ipaddress.IPv4Address(local_ip)))
+            except Exception:
+                pass
 
         cert = (
             x509.CertificateBuilder()
