@@ -75,6 +75,7 @@ const Dashboard = () => {
   const [isPieMonthOpen, setIsPieMonthOpen] = useState(false);
   const pieCategoryRef = useRef(null);
   const pieMonthRef = useRef(null);
+  const chartFilterRef = useRef(null);
 
   const getDisplayStatus = (r) => {
     if (!r) return '';
@@ -269,6 +270,9 @@ const Dashboard = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
+      if (chartFilterRef.current && !chartFilterRef.current.contains(event.target)) {
+        setIsChartFilterOpen(false);
+      }
       if (pieCategoryRef.current && !pieCategoryRef.current.contains(event.target)) {
         setIsPieCategoryOpen(false);
       }
@@ -644,11 +648,15 @@ const Dashboard = () => {
             <p className="text-slate-500 mt-1 text-sm">Overview of your asset requests and track their current statuses.</p>
           </div>
         {/* Monthly Button */}
-        <div className="relative z-20">
+        <div className="relative z-20" ref={chartFilterRef}>
           <button 
+            type="button"
             onClick={() => setIsChartFilterOpen(!isChartFilterOpen)}
-            onBlur={() => setTimeout(() => setIsChartFilterOpen(false), 200)}
-            className="flex items-center justify-between min-w-[110px] gap-2 text-sm border border-slate-200 rounded-full px-4 h-11 bg-white text-slate-700 font-bold focus:outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-500/20 transition-all shadow-sm hover:bg-slate-50"
+            className={`flex items-center justify-between min-w-[110px] gap-2 text-sm rounded-full px-4 h-11 bg-white text-slate-700 font-bold focus:outline-none transition-all shadow-sm hover:bg-slate-50 border ${
+              isChartFilterOpen
+                ? 'border-brand-300 ring-2 ring-brand-500/20'
+                : 'border-slate-200'
+            }`}
           >
             <span>{chartFilter}</span>
             <ChevronDown size={16} className={`text-slate-400 transition-transform ${isChartFilterOpen ? 'rotate-180' : ''}`} />

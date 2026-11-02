@@ -60,8 +60,28 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
         );
       }
 
+      const isReturned = getDisplayStatus(req) === 'Returned';
+
       return (
-        <div className="flex items-center justify-end space-x-1">
+        <div className="flex items-center justify-end space-x-1.5">
+          {isReturned && (
+            <>
+              <button
+                onClick={() => onAction('viewDetailsModal', req)}
+                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                title="View Return & Reply"
+              >
+                <MessageSquare size={18} />
+              </button>
+              <button
+                onClick={() => onAction('edit', req)}
+                className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
+                title="Edit Request"
+              >
+                <Edit2 size={18} />
+              </button>
+            </>
+          )}
           <button onClick={() => onAction('delete', req)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
             <Trash2 size={18} />
           </button>

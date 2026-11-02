@@ -50,12 +50,12 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: ['paperless', 'localhost', 'IT-SD2'],
+    allowedHosts: ['paperless', 'localhost'],
     https: httpsConfig,
   },
   preview: {
     port: 4001,
-    allowedHosts: ['paperless', 'localhost', 'IT-SD2'],
+    allowedHosts: ['paperless', 'localhost'],
     https: httpsConfig,
   },
   build: {

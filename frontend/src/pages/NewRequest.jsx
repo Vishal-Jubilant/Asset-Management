@@ -126,6 +126,7 @@ const NewRequest = () => {
       setSelectedRequestForModal(req);
       setIsDetailsModalOpen(true);
     } else if (action === 'edit') {
+      setIsDetailsModalOpen(false);
       setEditRequestForModal(req);
       setIsNewRequestModalOpen(true);
     } else if (action === 'reply') {

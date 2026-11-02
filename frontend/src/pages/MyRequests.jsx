@@ -312,6 +312,7 @@ const MyRequests = () => {
       setSelectedRequest(req);
       setIsModalOpen(true);
     } else if (action === 'edit') {
+      setIsModalOpen(false);
       setEditRequest(req);
       setIsNewRequestModalOpen(true);
     } else if (action === 'reply') {

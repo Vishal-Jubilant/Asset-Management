@@ -240,6 +240,16 @@ def main():
         sys.exit(1)
     print("[OK] SSL certificates found. HTTPS-only mode enabled.")
 
+    print("STEP 1c: Checking Frontend Dependencies...")
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+    node_modules_dir = os.path.join(FRONTEND_DIR, "node_modules")
+    if not os.path.exists(node_modules_dir):
+        print("[+] node_modules not found. Installing frontend dependencies...")
+        subprocess.run([npm_cmd, "install"], cwd=FRONTEND_DIR)
+        print("[OK] Frontend dependencies installed.")
+    else:
+        print("[OK] Frontend dependencies already installed.")
+
     print("STEP 2: Verifying Database Credentials...")
     db_url = get_db_url()
     if not db_url:
@@ -451,8 +461,6 @@ def main():
         )
     if not frontend_running:
         npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-        print("[+] Installing/updating frontend dependencies...")
-        subprocess.run([npm_cmd, "install"], cwd=FRONTEND_DIR)
         frontend_process = subprocess.Popen(
             [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", "4001"],
             cwd=FRONTEND_DIR,

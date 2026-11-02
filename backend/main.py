@@ -1400,7 +1400,7 @@ async def reply_to_returned_request(request_id: str, payload: ReturnReplyRequest
     if returner_step_index < 0:
         raise HTTPException(status_code=400, detail="The approver who returned this request is not in its workflow")
 
-    is_requester_reply = caller.id == r.requestedBy and r.status == "Returned"
+    is_requester_reply = caller.id == r.requestedBy and (r.status == "Returned" or "returned" in (r.status or "").lower())
     current_step_index = (r.currentStep or 1) - 1
     active_step = workflow[current_step_index] if 0 <= current_step_index < len(workflow) else {}
     active_approvers = [str(name).strip().lower() for name in active_step.get("approvers", [])]
@@ -1460,25 +1460,21 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     if request.requestedBy != r.requestedBy:
         raise HTTPException(status_code=400, detail="The requester cannot be changed")
 
-    was_returned = r.status == "Returned"
+    was_returned = r.status == "Returned" or "returned" in (r.status or "").lower()
         
     workflow = build_and_validate_workflow(request, db)
     previous_workflow = list(r.approvalSequence) if r.approvalSequence else []
     comments = list(r.commentsHistory) if r.commentsHistory else []
     requester = db.query(models.User).filter(models.User.id == request.requestedBy).first()
     reply_text = (request.returnReply or "").strip()
-    return_comment = None
-    target_step_index = 0
-    if was_returned and caller.id == r.requestedBy and reply_text:
-        if len(reply_text) > 1000:
-            raise HTTPException(status_code=400, detail="Reply must be 1000 characters or fewer.")
-        return_comment = next((comment for comment in reversed(comments) if comment.get("action") == "return"), None)
 
+    # When Update Request is submitted, flow always restarts from Step 1
+    target_step_index = 0
     target_step = workflow[target_step_index]
     current_step = int(target_step.get("step") or target_step_index + 1)
-    initial_status = f"Pending with {target_step['role']}"
+    initial_status = f"Pending with {target_step.get('role') or 'Head'}"
     for index, step in enumerate(workflow):
-        step["status"] = "pending" if index == target_step_index else "waiting"
+        step["status"] = "pending" if index == 0 else "waiting"
 
     item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
     if item and isinstance(item, str) and len(item) > 0:
@@ -1500,19 +1496,7 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     r.handledBy = []
     r.votes = {}
     r.approverSelections = {}
-    
-    if was_returned and caller.id == r.requestedBy and reply_text:
-        if return_comment is not None:
-            replies = list(return_comment.get("replies") or [])
-            user_role_label = 'MD' if is_md_user(caller) else ('Head' if is_head_user(caller) else (caller.role.capitalize() if caller.role else 'User'))
-            dept_label = f"{caller.department} " if caller.department else ""
-            replies.append({
-                "name": caller.name,
-                "role": f"{dept_label}{user_role_label}",
-                "comment": reply_text,
-                "date": datetime.now().isoformat()
-            })
-            return_comment["replies"] = replies
+
     comments.append({
         "name": requester.name if requester else "Requester",
         "role": requester.role.capitalize() if requester and requester.role else "User",

@@ -471,11 +471,16 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const isReturnInProgress = latestWorkflowAction?.action === 'return' &&
     !(latestWorkflowAction.replies?.length > 0) &&
     !['Approved', 'Rejected'].includes(request.status);
-  const canReplyToReturn = !isRequester &&
-    request.status?.includes('Pending') &&
-    latestWorkflowAction?.action === 'return' &&
-    latestWorkflowAction.sentToStr?.toLowerCase().trim() === currentUser?.name?.toLowerCase().trim() &&
-    isCurrentStepRecipient;
+  const canReplyToReturn = Boolean(
+    (!isRequester &&
+      request.status?.includes('Pending') &&
+      latestWorkflowAction?.action === 'return' &&
+      latestWorkflowAction.sentToStr?.toLowerCase().trim() === currentUser?.name?.toLowerCase().trim() &&
+      isCurrentStepRecipient) ||
+    (isRequester &&
+      (request.status === 'Returned' || request.status?.toLowerCase() === 'returned') &&
+      latestWorkflowAction?.action === 'return')
+  );
   const returnTargetName = (latestWorkflowAction?.sentToStr || '').toLowerCase().trim();
   const returnsToEarlierApprover = latestWorkflowAction?.action === 'return' &&
     (request.approvalSequence || []).some(step =>
@@ -1044,6 +1049,18 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between z-10">
             {validationError && <p className="text-[12px] font-medium text-rose-600">{validationError}</p>}
             <div className="ml-auto flex gap-3">
+              {isRequester && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onAction && onAction('edit', request);
+                  }}
+                  className="px-4 py-2.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  Edit Request
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}

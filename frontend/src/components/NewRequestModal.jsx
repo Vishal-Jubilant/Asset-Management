@@ -546,6 +546,26 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     setValidationError('');
     setIsSubmitting(true);
 
+    // Condition 2: If reply text is provided, submit as reply to the returning approver
+    if (canReplyToReturn && returnReply.trim()) {
+      try {
+        if (onAdd) {
+          await onAdd({
+            replyOnly: true,
+            returnReply: returnReply.trim()
+          });
+        }
+        onClose();
+      } catch (err) {
+        console.error('Error sending reply', err);
+        const serverMessage = err.response?.data?.detail;
+        setValidationError(typeof serverMessage === 'string' ? serverMessage : 'Failed to send reply. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (workflow.length === 0) {
       setValidationError('Please select at least one approver in the workflow.');
       setIsSubmitting(false);
@@ -595,7 +615,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           selectedReportingTo: approverNames,
           selectedReportingRole: formattedSequence[0]?.role || 'Head',
           attachments: base64Files,
-          returnReply: isReturnedToRequester ? returnReply.trim() : ''
+          returnReply: ''
         });
       }
       onClose();
