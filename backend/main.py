@@ -69,9 +69,6 @@ class UserCreate(BaseModel):
     reportingRole: Optional[str] = None
     password: Optional[str] = "password123"
 
-
-
-
 class AssetRequestCreate(BaseModel):
     assetType: str
     otherAssetType: Optional[str] = ""

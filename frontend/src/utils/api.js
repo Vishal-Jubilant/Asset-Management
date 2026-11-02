@@ -1,10 +1,11 @@
 import axios from 'axios';
 
 const getBaseURL = () => {
-    if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-        // Mirror the frontend's own protocol (http or https) so there are no mixed-content errors
-        const protocol = window.location.protocol; // 'https:' or 'http:'
-        return `${protocol}//${window.location.hostname}:4000/api`;
+    // In the browser, always use relative '/api' so requests route through the Vite proxy (port 4001).
+    // This avoids needing to expose backend port 4000 to the public network,
+    // and eliminates ERR_CONNECTION_TIMED_OUT, CORS, and SSL certificate mismatch errors.
+    if (typeof window !== 'undefined') {
+        return '/api';
     }
     return 'https://localhost:4000/api';
 };
