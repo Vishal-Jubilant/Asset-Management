@@ -1,10 +1,11 @@
 import io
+import math
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Flowable
 )
 from reportlab.pdfgen import canvas
 
@@ -61,7 +62,91 @@ def format_dt(dt_val):
     return dt_str
 
 
-def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
+class StarBadge(Flowable):
+    """Draws a premium 24-point official starburst seal with APPROVED or REJECTED."""
+    def __init__(self, status='APPROVED', size=64):
+        super().__init__()
+        self.status = str(status).upper()
+        self.size = size
+        self.width = size
+        self.height = size
+
+    def wrap(self, availWidth, availHeight):
+        return self.width, self.height
+
+    def draw(self):
+        canv = self.canv
+        cx = self.width / 2.0
+        cy = self.height / 2.0
+        r_out = self.size / 2.0
+        r_in = r_out * 0.86
+        points = 24
+
+        is_approved = 'APPROV' in self.status
+        if is_approved:
+            primary = colors.HexColor('#059669')    # emerald 600
+            dark = colors.HexColor('#065f46')       # emerald 800
+            light_bg = colors.HexColor('#ecfdf5')   # emerald 50
+            ring = colors.HexColor('#10b981')       # emerald 500
+            text = 'APPROVED'
+        else:
+            primary = colors.HexColor('#dc2626')    # red 600
+            dark = colors.HexColor('#991b1b')       # red 800
+            light_bg = colors.HexColor('#fef2f2')   # red 50
+            ring = colors.HexColor('#ef4444')       # red 500
+            text = 'REJECTED'
+
+        canv.saveState()
+
+        # 1. 24-point Starburst perimeter
+        p = canv.beginPath()
+        step = math.pi / points
+        for i in range(2 * points):
+            r = r_out if i % 2 == 0 else r_in
+            x = cx + r * math.cos(i * step)
+            y = cy + r * math.sin(i * step)
+            if i == 0:
+                p.moveTo(x, y)
+            else:
+                p.lineTo(x, y)
+        p.close()
+
+        canv.setFillColor(light_bg)
+        canv.setStrokeColor(primary)
+        canv.setLineWidth(1.4)
+        canv.drawPath(p, fill=1, stroke=1)
+
+        # 2. Concentric solid outer circle
+        canv.setStrokeColor(primary)
+        canv.setLineWidth(1.1)
+        canv.circle(cx, cy, r_out * 0.77, fill=0, stroke=1)
+
+        # 3. Inner dashed security ring
+        canv.setStrokeColor(ring)
+        canv.setLineWidth(0.6)
+        canv.setDash(1.5, 1.5)
+        canv.circle(cx, cy, r_out * 0.70, fill=0, stroke=1)
+        canv.setDash()
+
+        # 4. Top Stars: 3 mini stars
+        canv.setFont('Helvetica', 4.5)
+        canv.setFillColor(primary)
+        canv.drawCentredString(cx, cy + (r_out * 0.38), '★  ★  ★')
+
+        # 5. Central Bold Typography
+        canv.setFont('Helvetica-Bold', 7)
+        canv.setFillColor(dark)
+        canv.drawCentredString(cx, cy - 2.5, text)
+
+        # 6. Bottom Subtext: VERIFIED & VALID
+        canv.setFont('Helvetica-Bold', 3.8)
+        canv.setFillColor(primary)
+        canv.drawCentredString(cx, cy - (r_out * 0.44), 'VERIFIED & VALID')
+
+        canv.restoreState()
+
+
+def build_request_pdf(request_data: dict, requester_data: dict = None, users_map: dict = None) -> bytes:
     """
     Builds a pixel-perfect, clean, and professional PDF summary of an Asset Request
     matching the exact card layout of the RequestDetailsModal, without the attachments section.
@@ -72,27 +157,31 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
         pagesize=A4,
         leftMargin=36,
         rightMargin=36,
-        topMargin=54,
-        bottomMargin=54
+        topMargin=44,
+        bottomMargin=44
     )
+
+    users_map = users_map or {}
 
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
         'DocTitle',
-        parent=styles['Heading1'],
         fontName='Helvetica-Bold',
         fontSize=18,
         leading=22,
-        textColor=colors.HexColor('#0f172a')
+        textColor=colors.HexColor('#0f172a'),
+        spaceBefore=0,
+        spaceAfter=0
     )
     subtitle_style = ParagraphStyle(
         'DocSubtitle',
-        parent=styles['Normal'],
         fontName='Helvetica',
         fontSize=9.5,
         leading=13,
-        textColor=colors.HexColor('#64748b')
+        textColor=colors.HexColor('#64748b'),
+        spaceBefore=0,
+        spaceAfter=0
     )
     section_head_style = ParagraphStyle(
         'SectionHead',
@@ -147,66 +236,32 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
 
     story = []
 
-    # 1. Header Section: Item Name + Status Badge
-    status_str = str(request_data.get('status') or 'Pending').strip()
-    status_clean = status_str.replace("Pending with ", "Pending with ")
-    status_lower = status_str.lower()
-
-    if status_lower == 'approved':
-        badge_bg = colors.HexColor('#dcfce7')
-        badge_border = colors.HexColor('#86efac')
-        badge_text_hex = '#15803d'
-        badge_text = 'APPROVED'
-    elif status_lower == 'rejected':
-        badge_bg = colors.HexColor('#ffe4e6')
-        badge_border = colors.HexColor('#fca5a5')
-        badge_text_hex = '#be123c'
-        badge_text = 'DECLINED'
-    elif 'returned' in status_lower:
-        badge_bg = colors.HexColor('#fef3c7')
-        badge_border = colors.HexColor('#fde68a')
-        badge_text_hex = '#b45309'
-        badge_text = 'RETURNED'
-    else:
-        badge_bg = colors.HexColor('#f1f5f9')
-        badge_border = colors.HexColor('#cbd5e1')
-        badge_text_hex = '#475569'
-        badge_text = status_clean.upper()
-
-    badge_p = Paragraph(
-        f"<font color='{badge_text_hex}'><b>{badge_text}</b></font>",
-        ParagraphStyle('BadgeP', alignment=1, fontSize=9.5, leading=12)
-    )
-
+    # 1. Header Section: Item Name + Requested Date (Left), Star Status Badge (Top Right)
     item_name = request_data.get('item') or 'Asset Request'
     created_at_fmt = format_dt(request_data.get('createdAt'))
+    final_status = str(request_data.get('status') or 'Approved').strip()
+
+    left_header = [
+        Paragraph(f"<b>{item_name}</b>", title_style),
+        Spacer(1, 2),
+        Paragraph(f"Requested on {created_at_fmt}", subtitle_style),
+    ]
 
     header_data = [
         [
-            Paragraph(f"<b>{item_name}</b>", title_style),
-            Table([[badge_p]], colWidths=[95], rowHeights=[22], style=[
-                ('BACKGROUND', (0,0), (-1,-1), badge_bg),
-                ('BOX', (0,0), (-1,-1), 1, badge_border),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-                ('TOPPADDING', (0,0), (-1,-1), 3),
-            ])
-        ],
-        [
-            Paragraph(f"Requested on {created_at_fmt}", subtitle_style),
-            ""
+            left_header,
+            StarBadge(status=final_status, size=64)
         ]
     ]
 
-    header_table = Table(header_data, colWidths=[428, 95])
+    header_table = Table(header_data, colWidths=[459, 64])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('ALIGN', (1,0), (1,0), 'RIGHT'),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
         ('TOPPADDING', (0,0), (-1,-1), 0),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
     ]))
     story.append(header_table)
     story.append(Spacer(1, 12))
@@ -326,6 +381,7 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
             Paragraph("<b>Action</b>", th_style),
             Paragraph("<b>Date & Time</b>", th_style),
             Paragraph("<b>Comments / Remarks</b>", th_style),
+            Paragraph("<b>Return To</b>", th_style),
         ]]
 
         for h in history:
@@ -333,6 +389,7 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
             role = h.get('role') or ''
             action_raw = str(h.get('action') or '').lower()
             is_skipped = h.get('skipped') or action_raw in ['skip', 'skipped']
+            is_returned = action_raw in ['return', 'returned']
             date_fmt = format_dt(h.get('date'))
             comment_text = str(h.get('comment') or '').replace('[System: ', '').replace(']', '').strip()
 
@@ -348,7 +405,7 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
                 action_label = 'DECLINED'
                 act_color = '#be123c'
                 comment_display = comment_text or 'Declined.'
-            elif action_raw in ['return', 'returned']:
+            elif is_returned:
                 action_label = 'RETURNED'
                 act_color = '#b45309'
                 comment_display = comment_text or 'Returned for edits.'
@@ -361,15 +418,68 @@ def build_request_pdf(request_data: dict, requester_data: dict = None) -> bytes:
                 act_color = '#475569'
                 comment_display = comment_text or 'No comments filled.'
 
+            replies = h.get('replies') or []
+            if isinstance(replies, list) and replies:
+                for rep in replies:
+                    rep_name = rep.get('name') or 'User'
+                    rep_comment = rep.get('comment') or ''
+                    comment_display += f"<br/><font size=7.5 color='#2563eb'><b>Reply ({rep_name}):</b> {rep_comment}</font>"
+
+            added_flow = h.get('addedFlow') or []
+            if isinstance(added_flow, list) and added_flow:
+                flow_strs = [f"{f.get('name', '')} ({f.get('department', '')} {f.get('role', '')})".strip() for f in added_flow]
+                comment_display += f"<br/><font size=7 color='#047857'><b>Added Flow:</b> {', '.join(flow_strs)}</font>"
+
+            # Format Return To column
+            if is_returned:
+                return_raw = (
+                    h.get('sentToStr') or 
+                    h.get('returnTarget') or 
+                    h.get('sentTo') or 
+                    h.get('returnedTo') or 
+                    ''
+                )
+                if isinstance(return_raw, dict):
+                    return_raw = return_raw.get('label') or return_raw.get('value') or ''
+                elif isinstance(return_raw, list):
+                    return_raw = ", ".join([str(x.get('label', x.get('value', x)) if isinstance(x, dict) else x) for x in return_raw])
+                else:
+                    return_raw = str(return_raw).strip()
+
+                if not return_raw:
+                    return_raw = (requester_data or {}).get('name') or str(request_data.get('requestedBy') or '')
+
+                if " - " in return_raw:
+                    parts = return_raw.split(" - ", 1)
+                    t_name = parts[0].strip()
+                    t_role = parts[1].strip()
+                    return_display = f"<b>{t_name}</b><br/><font size=7 color='#64748b'>({t_role})</font>"
+                elif return_raw:
+                    target_user = users_map.get(return_raw.lower().strip()) or users_map.get(str(return_raw).strip())
+                    if target_user:
+                        t_name = target_user.get('name') or return_raw
+                        t_dept = target_user.get('department') or ''
+                        t_role = target_user.get('role') or target_user.get('departmentRole') or 'User'
+                        t_role_label = 'MD' if t_role.lower() == 'md' else ('Admin' if t_role.lower() == 'admin' else ('Head' if t_role.lower() == 'head' else t_role.capitalize()))
+                        t_full_role = f"{t_dept} {t_role_label}".strip() if t_dept and t_role_label != 'MD' else t_role_label
+                        return_display = f"<b>{t_name}</b><br/><font size=7 color='#64748b'>({t_full_role})</font>"
+                    else:
+                        return_display = f"<b>{return_raw}</b>"
+                else:
+                    return_display = "<font color='#94a3b8'>—</font>"
+            else:
+                return_display = "<font color='#94a3b8'>—</font>"
+
             hist_rows.append([
                 Paragraph(f"<b>{name}</b>", td_style),
                 Paragraph(role, td_style),
                 Paragraph(f"<font color='{act_color}'><b>{action_label}</b></font>", td_style),
                 Paragraph(date_fmt, td_style),
-                Paragraph(comment_display, td_style)
+                Paragraph(comment_display, td_style),
+                Paragraph(return_display, td_style)
             ])
 
-        hist_table = Table(hist_rows, colWidths=[90, 85, 75, 110, 163])
+        hist_table = Table(hist_rows, colWidths=[80, 75, 65, 100, 118, 85])
         hist_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f5f9')),
             ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#cbd5e1')),

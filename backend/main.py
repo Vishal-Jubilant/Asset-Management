@@ -883,7 +883,17 @@ def download_asset_request_pdf(request_id: str, authorization: str = Header(None
     requester = db.query(models.User).filter(models.User.id == r.requestedBy).first()
     requester_data = format_user(requester) if requester else None
 
-    pdf_bytes = build_request_pdf(req_data, requester_data)
+    # Load users map to enrich Return To recipients with names and roles
+    all_users = db.query(models.User).all()
+    users_map = {}
+    for u in all_users:
+        u_info = format_user(u)
+        if u.name:
+            users_map[u.name.lower().strip()] = u_info
+        if u.id:
+            users_map[str(u.id).strip()] = u_info
+
+    pdf_bytes = build_request_pdf(req_data, requester_data, users_map)
     filename = f"{r.id}_Details.pdf"
 
     return Response(
