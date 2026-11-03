@@ -3,12 +3,13 @@ import ReactDOM from 'react-dom';
 import {
   X, Plus, Package, Paperclip, User, Shield,
   ChevronDown, CheckCircle2, Lock, Building2,
-  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send
+  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send, Download, Eye
 } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
+import { processPasteToAttachment, isTableOrImageData } from '../utils/tableToImage';
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 const isHead = (u) =>
@@ -96,6 +97,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   });
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [fileError, setFileError] = useState('');
+  const [pasteFeedback, setPasteFeedback] = useState('');
+  const [isProcessingPaste, setIsProcessingPaste] = useState(false);
   const [validationError, setValidationError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [returnReply, setReturnReply] = useState('');
@@ -531,6 +534,38 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
 
   const removeFile = (index) => setAttachedFiles(prev => prev.filter((_, i) => i !== index));
 
+  const handlePasteToAttachment = async (e) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // Check synchronously and call preventDefault immediately so raw table text is NEVER inserted into textarea!
+    if (isTableOrImageData(clipboardData)) {
+      e.preventDefault();
+    } else {
+      return;
+    }
+
+    setIsProcessingPaste(true);
+    try {
+      const result = await processPasteToAttachment(clipboardData);
+      if (result.success && result.file) {
+        setFileError('');
+        setAttachedFiles(prev => [...prev, result.file]);
+
+        setPasteFeedback(
+          result.isTable
+            ? 'Excel table saved as image attachment!'
+            : 'Image saved as attachment!'
+        );
+        setTimeout(() => setPasteFeedback(''), 4500);
+      }
+    } catch (err) {
+      console.error('Failed to handle paste:', err);
+    } finally {
+      setIsProcessingPaste(false);
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     let v = value;
@@ -731,7 +766,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <label className="text-[13px] font-medium text-slate-700">
-                  Description <span className="text-red-500 ml-0.5">*</span>
+                  Description {attachedFiles.length === 0 && <span className="text-red-500 ml-0.5">*</span>}
                 </label>
                 <span className={`text-[11px] font-medium tabular-nums ${formData.justification.length > 900 ? 'text-rose-500' : 'text-slate-400'}`}>
                   {formData.justification.length}/1000
@@ -740,13 +775,20 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
               <textarea
                 rows={3}
                 name="justification"
-                placeholder="Provide a brief business justification..."
+                placeholder="Provide a brief business justification or paste Excel table (Ctrl+V)..."
                 value={formData.justification}
                 onChange={handleChange}
-                required
+                onPaste={handlePasteToAttachment}
+                required={attachedFiles.length === 0}
                 maxLength={1000}
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-800 text-[13px] resize-none shadow-sm transition-all placeholder:text-slate-400"
               />
+              {pasteFeedback && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-[12px] font-medium shadow-xs animate-in fade-in">
+                  <CheckCircle2 size={15} className="text-emerald-600 flex-shrink-0" />
+                  <span className="flex-1">{pasteFeedback}</span>
+                </div>
+              )}
             </div>
 
             {/* Attachments */}
@@ -756,29 +798,82 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
               </label>
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-3 px-4 py-3 border border-dashed border-slate-300 bg-white rounded-xl cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 transition-all group shadow-sm"
+                onPaste={handlePasteToAttachment}
+                tabIndex={0}
+                className="flex items-center gap-3 px-4 py-3 border border-dashed border-slate-300 bg-white rounded-xl cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 transition-all group shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20"
               >
                 <div className="w-8 h-8 rounded-md bg-white border border-slate-200 group-hover:border-brand-200 flex items-center justify-center shadow-sm transition-colors">
                   <Paperclip size={14} className="text-slate-400 group-hover:text-brand-600 transition-colors" />
                 </div>
                 <div>
                   <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files or screenshots</p>
-                  <p className="text-[11px] text-slate-400">Up to 10MB per file</p>
+                  <p className="text-[11px] text-slate-400">Up to 10MB per file • Or paste directly (Ctrl+V)</p>
                 </div>
               </div>
               <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" multiple className="hidden" />
               {fileError && <p className="text-xs text-rose-500 font-medium">{fileError}</p>}
               {attachedFiles.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-1">
-                  {attachedFiles.map((file, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                      <Paperclip size={13} className="text-slate-400 flex-shrink-0" />
-                      <span className="truncate flex-1 text-[12px] font-medium">{file.name}</span>
-                      <button type="button" onClick={() => removeFile(idx)} className="text-slate-400 hover:text-rose-500 p-1 hover:bg-rose-50 rounded transition-colors">
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
+                  {attachedFiles.map((file, idx) => {
+                    const isImg = file.type && file.type.startsWith('image/');
+                    return (
+                      <div key={idx} className="flex items-center gap-2.5 text-sm text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                        {isImg ? (
+                          <span className="w-5 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">
+                            IMG
+                          </span>
+                        ) : (
+                          <Paperclip size={13} className="text-slate-400 flex-shrink-0" />
+                        )}
+                        <span className="truncate flex-1 text-[12px] font-medium text-slate-700">{file.name}</span>
+                        {isImg && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const url = URL.createObjectURL(file);
+                              const w = window.open();
+                              if (w) {
+                                w.document.write(`
+                                  <html><head><title>${file.name}</title></head>
+                                  <body style="margin:0; background:#0f172a; display:flex; align-items:center; justify-content:center; height:100vh;">
+                                    <img src="${url}" style="max-width:90vw; max-height:90vh; object-fit:contain; border-radius:6px; box-shadow:0 10px 25px rgba(0,0,0,0.5);" />
+                                  </body></html>
+                                `);
+                                w.document.close();
+                              }
+                            }}
+                            className="text-slate-400 hover:text-brand-600 px-1.5 py-0.5 rounded text-[11px] font-semibold hover:bg-brand-50 transition-colors inline-flex items-center gap-1"
+                            title="Preview image"
+                          >
+                            <Eye size={12} />
+                            View
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const url = URL.createObjectURL(file);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = file.name;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                          }}
+                          className="text-slate-400 hover:text-brand-600 p-1 hover:bg-brand-50 rounded transition-colors"
+                          title="Download file"
+                        >
+                          <Download size={13} />
+                        </button>
+                        <button type="button" onClick={() => removeFile(idx)} className="text-slate-400 hover:text-rose-500 p-1 hover:bg-rose-50 rounded transition-colors" title="Remove attachment">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

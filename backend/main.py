@@ -2,7 +2,7 @@ import os
 import uuid
 import jwt
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any, Dict, Literal, Union
@@ -11,7 +11,9 @@ from sqlalchemy import desc
 from sqlalchemy.orm.attributes import flag_modified
 
 import models
-from database import engine, get_db
+import asyncio
+from database import engine, get_db, SessionLocal
+from pdf_generator import build_request_pdf
 
 # Create tables if not exist
 models.Base.metadata.create_all(bind=engine)
@@ -690,11 +692,208 @@ async def validate_approvers(payload: dict, authorization: str = Header(None), d
         raise HTTPException(status_code=400, detail="; ".join(errors))
     return {"valid": True}
 
+
+def parse_iso_datetime(dt_str):
+    if not dt_str:
+        return None
+    if isinstance(dt_str, datetime):
+        return dt_str
+    try:
+        return datetime.fromisoformat(str(dt_str))
+    except Exception:
+        pass
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(str(dt_str), fmt)
+        except Exception:
+            continue
+    return None
+
+def check_and_escalate_overdue_requests(db: Session):
+    """
+    Checks all pending asset requests.
+    If an approver has not responded (approve/reject/return) for >= 24 hours,
+    and they are NOT the final approver, automatically forward/skip to the next approver.
+    """
+    try:
+        pending_requests = (
+            db.query(models.AssetRequest)
+            .filter(models.AssetRequest.status.like("Pending%"))
+            .all()
+        )
+        if not pending_requests:
+            return
+
+        all_users = db.query(models.User).filter(models.User.status == "Active").all()
+        now = datetime.now()
+        modified = False
+
+        for r in pending_requests:
+            workflow = list(r.approvalSequence) if r.approvalSequence else []
+            if not workflow or len(workflow) <= 1:
+                continue
+
+            cur_step = r.currentStep or 1
+            cur_idx = cur_step - 1
+
+            # Condition: only applies to steps BEFORE the final approval step
+            if cur_idx < 0 or cur_idx >= len(workflow) - 1:
+                continue
+
+            active_step = workflow[cur_idx]
+            step_pending_since = active_step.get("pendingSince")
+            step_start_dt = None
+
+            if step_pending_since:
+                step_start_dt = parse_iso_datetime(step_pending_since)
+
+            if not step_start_dt:
+                if cur_idx == 0:
+                    step_start_dt = parse_iso_datetime(r.createdAt)
+                else:
+                    last_event_dt = None
+                    if r.commentsHistory:
+                        for c in reversed(r.commentsHistory):
+                            if c.get("date"):
+                                dt = parse_iso_datetime(c["date"])
+                                if dt:
+                                    last_event_dt = dt
+                                    break
+                    step_start_dt = (
+                        last_event_dt
+                        or parse_iso_datetime(r.updatedAt)
+                        or parse_iso_datetime(r.createdAt)
+                    )
+
+            if not step_start_dt:
+                continue
+
+            # Check if 24 hours (86400 seconds) have elapsed with no response
+            elapsed_seconds = (now - step_start_dt).total_seconds()
+            if elapsed_seconds < 24 * 3600:
+                continue
+
+            # Auto-skip this approver step
+            active_step["status"] = "skipped"
+
+            approver_names = active_step.get("approvers", [])
+            skipped_name = approver_names[0] if approver_names else "Approver"
+            target_user = next(
+                (
+                    u
+                    for u in all_users
+                    if u.name.strip().lower() == skipped_name.strip().lower()
+                ),
+                None,
+            )
+
+            user_role_label = (
+                "MD"
+                if (target_user and is_md_user(target_user))
+                else (
+                    "Head"
+                    if (target_user and is_head_user(target_user))
+                    else (
+                        target_user.role.capitalize()
+                        if target_user and target_user.role
+                        else (active_step.get("role") or "Head")
+                    )
+                )
+            )
+            dept_label = (
+                f"{target_user.department} "
+                if (target_user and target_user.department)
+                else (
+                    f"{active_step.get('department')} "
+                    if active_step.get("department")
+                    else ""
+                )
+            )
+
+            commentsHistory = list(r.commentsHistory) if r.commentsHistory else []
+            comment_entry = {
+                "name": skipped_name,
+                "role": f"{dept_label}{user_role_label}".strip(),
+                "comment": "Skipped due to no response",
+                "date": now.isoformat(),
+                "action": "skip",
+                "step": active_step.get("step", cur_step),
+                "skipped": True,
+            }
+            commentsHistory.append(comment_entry)
+
+            # Advance to the next approver step
+            next_idx = cur_idx + 1
+            next_step = workflow[next_idx]
+            next_step["status"] = "pending"
+            next_step["pendingSince"] = now.isoformat()
+
+            r.currentStep = next_step.get("step", next_idx + 1)
+            r.forwardedTo = next_step.get("approvers")
+            r.routedTo = next_step.get("approvers")
+            r.status = f"Pending with {next_step.get('role') or 'Head'}"
+            r.handledBy = []
+            r.votes = {}
+            r.commentsHistory = commentsHistory
+            r.approvalSequence = workflow
+            r.updatedAt = now.isoformat()
+
+            flag_modified(r, "approvalSequence")
+            flag_modified(r, "commentsHistory")
+            flag_modified(r, "handledBy")
+            flag_modified(r, "votes")
+
+            db.add(r)
+            modified = True
+
+        if modified:
+            db.commit()
+
+    except Exception as e:
+        print(f"Error in check_and_escalate_overdue_requests: {e}")
+        db.rollback()
+
 @app.get("/api/asset-requests")
 async def get_asset_requests(authorization: str = Header(None), db: Session = Depends(get_db)):
     get_caller(authorization, db)
+    check_and_escalate_overdue_requests(db)
     requests = db.query(models.AssetRequest).order_by(desc(models.AssetRequest.createdAt)).all()
     return [{c: getattr(r, c) for c in r.__table__.columns.keys()} for r in requests]
+
+@app.get("/api/asset-requests/{request_id}/pdf")
+def download_asset_request_pdf(request_id: str, authorization: str = Header(None), db: Session = Depends(get_db)):
+    get_caller(authorization, db)
+    r = db.query(models.AssetRequest).filter(models.AssetRequest.id == request_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    status_str = (r.status or "").lower()
+    if status_str not in ["approved", "rejected"]:
+        raise HTTPException(
+            status_code=400,
+            detail="PDF download is only available once final approval or rejection is complete."
+        )
+
+    req_data = {c: getattr(r, c) for c in r.__table__.columns.keys()}
+    requester = db.query(models.User).filter(models.User.id == r.requestedBy).first()
+    requester_data = format_user(requester) if requester else None
+
+    pdf_bytes = build_request_pdf(req_data, requester_data)
+    filename = f"{r.id}_Details.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
 
 def build_and_validate_workflow(request: AssetRequestCreate, db: Session):
     requester = db.query(models.User).filter(models.User.id == request.requestedBy).first()
@@ -905,6 +1104,9 @@ async def create_asset_request(request: AssetRequestCreate, authorization: str =
             justification = request.justification
             if justification and isinstance(justification, str) and len(justification) > 0:
                 justification = justification[0].upper() + justification[1:]
+
+            if workflow and len(workflow) > 0:
+                workflow[0]["pendingSince"] = datetime.now().isoformat()
 
             new_request = models.AssetRequest(
                 id=new_id,
@@ -1236,6 +1438,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
             ret_idx, ret_step = returned_to_step
             updatedCurrentStep = ret_step.get("step", ret_idx + 1)
             ret_step["status"] = "pending"
+            ret_step["pendingSince"] = datetime.now().isoformat()
             for s_idx in range(ret_idx + 1, len(workflow)):
                 workflow[s_idx]["status"] = "waiting"
 
@@ -1309,6 +1512,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
                 if workflow and next_idx < len(workflow):
                     next_step = workflow[next_idx]
                     next_step["status"] = "pending"
+                    next_step["pendingSince"] = datetime.now().isoformat()
                     updatedCurrentStep = next_step["step"]
                     updatedForwardedTo = next_step["approvers"]
                     handledBy = []
@@ -1524,3 +1728,18 @@ async def delete_asset_request(request_id: str, authorization: str = Header(None
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+@app.on_event("startup")
+async def startup_event():
+    async def background_overdue_checker():
+        while True:
+            try:
+                db = SessionLocal()
+                check_and_escalate_overdue_requests(db)
+                db.close()
+            except Exception as e:
+                print("Background overdue checker error:", e)
+            await asyncio.sleep(60)
+
+    asyncio.create_task(background_overdue_checker())

@@ -23,7 +23,7 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   const isReturnedToRequester = request.status === 'Returned' && isRequester;
   const latestReturnEvent = [...history].reverse().find(comment => comment.action === 'return');
   const latestWorkflowEvent = [...history].reverse().find(comment =>
-    ['approve', 'reject', 'return'].includes(comment.action)
+    ['approve', 'reject', 'return', 'skip'].includes(comment.action)
   );
   const latestReturnReply = latestReturnEvent?.replies?.at(-1);
   const replyIsLatestEvent = latestReturnReply &&
@@ -41,10 +41,13 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
   const editEvent = latestHistoryEvent?.action === 'edit' && currentStep === 1
     ? latestHistoryEvent
     : null;
+  const skipEvent = latestWorkflowEvent?.action === 'skip' && Number(latestWorkflowEvent.step) === currentStep - 1
+    ? latestWorkflowEvent
+    : null;
   const approvalEvent = latestWorkflowEvent?.action === 'approve' && Number(latestWorkflowEvent.step) === currentStep - 1
     ? latestWorkflowEvent
     : null;
-  const event = replyEvent || returnEvent || editEvent || approvalEvent;
+  const event = replyEvent || returnEvent || editEvent || skipEvent || approvalEvent;
 
   if (!event) {
     return {
@@ -59,7 +62,11 @@ export const getRequestNotificationDetails = (request, currentUser, requesterNam
       ? 'reply'
       : event.action === 'return'
         ? 'returned'
-        : event.action === 'edit' ? 'updated' : 'forwarded',
+        : event.action === 'edit'
+          ? 'updated'
+          : event.action === 'skip'
+            ? 'skipped'
+            : 'forwarded',
     sender: replyEvent?.name || event.name || requesterName,
     receivedAt: event.date || request.updatedAt || request.createdAt
   };

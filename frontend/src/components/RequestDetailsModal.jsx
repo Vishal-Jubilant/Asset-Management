@@ -1,15 +1,16 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
-  User, Hash, Monitor, AlertCircle, Paperclip, Download, Shield,
-  ArrowRight, Send, ChevronDown, Lock, Plus
+  User, Hash, Eye, AlertCircle, Paperclip, Download, Shield,
+  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
+import api from '../utils/api';
 
 // Helper components for design system
-const Label = ({ children }) => (
-  <span className="block text-[11px] font-semibold tracking-[0.05em] uppercase text-slate-500 mb-1.5">
+const Label = ({ children, className = '' }) => (
+  <span className={`block text-[10px] sm:text-[11px] md:text-xs font-semibold tracking-[0.05em] uppercase text-slate-500 mb-1 sm:mb-1.5 ${className}`}>
     {children}
   </span>
 );
@@ -23,7 +24,7 @@ const Badge = ({ children, variant = 'default', className = '' }) => {
     blue: "bg-blue-50 text-blue-700 border border-blue-200",
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${variants[variant]} ${className}`}>
+    <span className={`inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] md:text-xs font-medium ${variants[variant]} ${className}`}>
       {children}
     </span>
   );
@@ -61,6 +62,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const [validationError, setValidationError] = useState('');
   const [returnReply, setReturnReply] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isWorkflowMenuOpen, setIsWorkflowMenuOpen] = useState(false);
   const [selectedWorkflowApprovers, setSelectedWorkflowApprovers] = useState([]);
   const workflowScrollerRef = useRef(null);
@@ -77,6 +79,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       setValidationError('');
       setReturnReply('');
       setIsSendingReply(false);
+      setIsDownloadingPdf(false);
       setIsWorkflowMenuOpen(false);
       setSelectedWorkflowApprovers([]);
     }
@@ -134,6 +137,34 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const isHandled = (request.handledBy || []).some(id => String(id) === currentUserId);
   const isRequester = String(request.requestedBy) === currentUserId;
   const hasVoted = Boolean(request.votes?.[currentUserId]);
+
+  const isOverallApproved = Boolean(request.status === 'Approved' || request.status?.toLowerCase() === 'approved');
+  const isOverallRejected = Boolean(request.status === 'Rejected' || request.status?.toLowerCase() === 'rejected');
+  const isFinalDecision = isOverallApproved || isOverallRejected;
+
+  const handleDownloadPdf = async () => {
+    if (isDownloadingPdf || !request?.id) return;
+    setIsDownloadingPdf(true);
+    try {
+      const response = await api.get(`/asset-requests/${request.id}/pdf`, {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${request.id}_Details.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
 
   const isForwardedToMe = (() => {
     if (request.forwardedTo && request.forwardedTo.length > 0) {
@@ -294,6 +325,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       setValidationError(typeof serverMessage === 'string' ? serverMessage : 'Failed to send reply. Please try again.');
     } finally {
       setIsSendingReply(false);
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -315,13 +347,13 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
 
   // Determine overall status badge
   let overallStatusVariant = 'amber';
-  let overallStatusIcon = <Clock className="w-3 h-3" />;
+  let overallStatusIcon = <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4" />;
   if (request.status.toLowerCase().includes('approved') && !request.status.toLowerCase().includes('pending')) {
     overallStatusVariant = 'green';
-    overallStatusIcon = <Check className="w-3 h-3" />;
+    overallStatusIcon = <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4" />;
   } else if (request.status.toLowerCase().includes('reject') || request.status.toLowerCase().includes('decline')) {
     overallStatusVariant = 'red';
-    overallStatusIcon = <X className="w-3 h-3" />;
+    overallStatusIcon = <X className="w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4" />;
   }
 
   // Generate timeline groups
@@ -493,51 +525,51 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const isReturnToRequester = latestWorkflowAction?.action === 'return' && !returnsToEarlierApprover;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-2 sm:p-4 md:p-6 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl max-h-[92vh] sm:max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300">
         
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-200 bg-slate-100 relative">
+        <div className="px-4 py-3.5 sm:px-6 sm:py-5 border-b border-slate-200 bg-slate-100 relative">
           <button 
             onClick={onClose}
             aria-label="Close request details"
-            className="absolute top-5 right-5 p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 rounded-full transition-colors"
+            className="absolute top-3.5 right-3.5 sm:top-5 sm:right-5 p-1 sm:p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 rounded-full transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5 md:w-5.5 md:h-5.5" />
           </button>
           
           <div className="flex items-center gap-3 mb-0.5 pr-10">
-            <h2 className="text-[18px] font-semibold text-slate-900">{request.item}</h2>
+            <h2 className="text-base sm:text-lg md:text-xl lg:text-2xl font-bold text-slate-900 leading-tight">{request.item}</h2>
             <Badge variant={overallStatusVariant}>
               <span className="flex items-center gap-1.5">
                 {overallStatusIcon} {request.status.startsWith('Pending') ? 'Pending' : request.status}
               </span>
             </Badge>
           </div>
-          <p className="text-[13px] text-slate-500">Requested on {formatDateTime(request.createdAt)}</p>
+          <p className="text-xs sm:text-sm md:text-[14px] text-slate-500">Requested on {formatDateTime(request.createdAt)}</p>
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-6 scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 space-y-4 sm:space-y-6 scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
           
           {/* Metadata Section */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 bg-[#F8F9FB] p-3.5 rounded-[12px] border border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 bg-[#F8F9FB] p-2.5 sm:p-3.5 md:p-4 rounded-[12px] border border-slate-100">
             
             {/* 1. Request ID */}
             <div className="bg-white border border-slate-200/75 rounded-[11px] p-3 flex flex-col justify-center shadow-[0_1px_2px_rgba(0,0,0,0.01)] h-full">
               <div className="min-w-0">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Request ID</span>
-                <span className="block text-[13.5px] font-bold text-slate-800 truncate">{request.id}</span>
+                <span className="block text-[9px] sm:text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Request ID</span>
+                <span className="block text-xs sm:text-sm md:text-base font-bold text-slate-800 truncate">{request.id}</span>
               </div>
             </div>
 
             {/* 2. Requested By */}
             <div className="bg-white border border-slate-200/75 rounded-[11px] p-3 flex flex-col justify-center shadow-[0_1px_2px_rgba(0,0,0,0.01)] h-full">
               <div className="min-w-0 flex-1">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Requested By</span>
+                <span className="block text-[9px] sm:text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Requested By</span>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[13.5px] font-bold text-slate-800 break-words">{requester?.name || request.requestedBy}</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase tracking-wider flex-shrink-0">
+                  <span className="text-xs sm:text-sm md:text-base font-bold text-slate-800 break-words">{requester?.name || request.requestedBy}</span>
+                  <span className="text-[8px] sm:text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase tracking-wider flex-shrink-0">
                      {roleName}
                   </span>
                 </div>
@@ -547,8 +579,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             {/* 3. Category */}
             <div className="bg-white border border-slate-200/75 rounded-[11px] p-3 flex flex-col justify-center shadow-[0_1px_2px_rgba(0,0,0,0.01)] h-full sm:col-span-2 md:col-span-1">
               <div className="min-w-0">
-                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Category</span>
-                <span className="block text-[13.5px] font-bold text-slate-800 truncate">{request.category}</span>
+                <span className="block text-[9px] sm:text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Category</span>
+                <span className="block text-xs sm:text-sm md:text-base font-bold text-slate-800 truncate">{request.category}</span>
               </div>
             </div>
             
@@ -556,7 +588,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
 
           {/* Description */}
           <div>
-            <h3 className="text-[15px] font-semibold text-slate-900 mb-2.5">Request Details</h3>
+            <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-1.5 sm:mb-2.5">Request Details</h3>
             <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 text-[13.5px] text-slate-700 leading-relaxed min-h-[60px]">
               {request.justification || <span className="text-slate-400 italic">No description provided.</span>}
             </div>
@@ -565,16 +597,16 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           {/* Attachments */}
           {request.attachments && request.attachments.length > 0 && (
             <div>
-              <h3 className="text-[15px] font-semibold text-slate-900 mb-2.5">Attachments</h3>
+              <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-1.5 sm:mb-2.5">Attachments</h3>
               <div className="flex flex-wrap gap-3">
                 {request.attachments.map((file, idx) => (
                   <div key={idx} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2 shadow-sm pr-4 max-w-sm w-full sm:w-auto">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                      <Paperclip size={18} />
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                      <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <div className="flex-1 min-w-[120px] overflow-hidden">
-                      <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
-                      <p className="text-[11px] text-slate-500 uppercase tracking-wide">Image</p>
+                      <p className="text-xs sm:text-sm md:text-[14px] font-semibold text-slate-800 truncate">{file.name}</p>
+                      <p className="text-[9px] sm:text-[10px] md:text-[11px] text-slate-500 uppercase tracking-wide">Image</p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0 border-l border-slate-100 pl-2">
                       <button 
@@ -595,7 +627,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="View"
                       >
-                        <Monitor size={16} />
+                        <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
                       </button>
                       <a 
                         href={file.data} 
@@ -603,7 +635,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="Download"
                       >
-                        <Download size={16} />
+                        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
                       </a>
                     </div>
                   </div>
@@ -631,15 +663,15 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
 
           {/* Approval Sequence Workflow Card */}
           {request.approvalSequence && request.approvalSequence.length > 0 && (
-            <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-4 sm:p-5">
+            <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3 sm:p-4 md:p-5 lg:p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-[12px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <Shield size={14} className="text-blue-600" />
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5 text-blue-600" />
                   Approval Status Workflow
                 </h3>
                 <div ref={workflowMenuRef} className="relative flex items-center gap-2">
                   <span
-                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border shadow-2xs ${
+                    className={`text-[10px] sm:text-[11px] md:text-xs font-semibold px-2 sm:px-2.5 py-0.5 rounded-full border shadow-2xs ${
                       request.status === 'Approved'
                         ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                         : request.status === 'Rejected'
@@ -655,11 +687,11 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <button
                     type="button"
                     onClick={() => setIsWorkflowMenuOpen(prev => !prev)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700"
+                    className="inline-flex items-center gap-1 sm:gap-1.5 rounded-lg border border-slate-200 bg-white px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] md:text-xs font-semibold text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700"
                     aria-expanded={isWorkflowMenuOpen}
                   >
                     Edit Workflow
-                    <ChevronDown size={13} className={isWorkflowMenuOpen ? 'rotate-180' : ''} />
+                    <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isWorkflowMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {isWorkflowMenuOpen && (
                     <div className="absolute right-0 top-8 z-30 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
@@ -736,10 +768,10 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                 className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full"
               >
                 <React.Fragment key="requester">
-                  <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] px-1">
+                  <div className="flex flex-col items-center text-center flex-1 min-w-[95px] sm:min-w-[115px] md:min-w-[130px] px-1">
                     <div className="relative">
-                      <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center bg-emerald-50 border-2 border-emerald-300 text-emerald-700">
-                        <User className="w-5 h-5" />
+                      <div className="w-9 h-9 sm:w-11 sm:h-11 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-full flex items-center justify-center bg-emerald-50 border-2 border-emerald-300 text-emerald-700 shadow-sm">
+                        <User className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
                       </div>
                       {request.status === 'Returned' && isReturnInProgress && isReturnToRequester && (
                         <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3" title="Request returned to requester">
@@ -749,10 +781,10 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                       )}
                     </div>
                     <div className="mt-2.5 flex flex-col items-center w-full">
-                      <span className="text-[12.5px] font-bold text-emerald-800 block text-center leading-tight break-words w-full">
+                      <span className="text-xs sm:text-[13px] md:text-sm font-bold text-emerald-800 block text-center leading-tight break-words w-full">
                         {requester?.name || 'Requester'}
                       </span>
-                      <span className="text-[11px] text-emerald-700 block text-center leading-snug break-words w-full mt-1">
+                      <span className="text-[10px] sm:text-[11px] md:text-xs text-emerald-700 block text-center leading-snug break-words w-full mt-0.5 sm:mt-1">
                         {requesterDepartmentRole}
                       </span>
                     </div>
@@ -760,7 +792,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   <div className="flex-1 flex items-center justify-center min-w-[28px] sm:min-w-[48px] pt-4 sm:pt-4.5 px-1">
                     <div className="w-full flex items-center justify-center">
                       <span className="h-[2px] w-full rounded-l-full bg-slate-200" />
-                      <ArrowRight className="w-4 h-4 shrink-0 -ml-1 text-slate-300" strokeWidth={2.5} />
+                      <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 shrink-0 -ml-1 text-slate-300" strokeWidth={2.5} />
                     </div>
                   </div>
                 </React.Fragment>
@@ -812,7 +844,13 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     (isOverallReturned && stepNumber === currentStepNum)
                   );
 
-                  const isCompleted = !isCurrent && !isFutureStep && !isRejected && !isReturned && (
+                  const isSkipped = !isCurrent && !isFutureStep && !isRejected && !isReturned && (
+                    step.status === 'skipped' ||
+                    latestStepComment?.action === 'skip' ||
+                    latestStepComment?.skipped
+                  );
+
+                  const isCompleted = !isCurrent && !isFutureStep && !isRejected && !isReturned && !isSkipped && (
                     hasPriorApproval ||
                     isOverallApproved ||
                     (latestStepComment?.action === 'approve') ||
@@ -827,13 +865,15 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   return (
                     <React.Fragment key={sIdx}>
                       {/* Step Item Column */}
-                      <div className="flex flex-col items-center text-center flex-1 min-w-[110px] sm:min-w-[125px] group px-1">
+                      <div className="flex flex-col items-center text-center flex-1 min-w-[95px] sm:min-w-[115px] md:min-w-[130px] group px-1">
                         {/* Circle Shape Step Indicator */}
                         <div className="relative flex items-center justify-center">
                           <div
-                            className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-200 ${
+                            className={`w-9 h-9 sm:w-11 sm:h-11 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm md:text-base transition-all duration-200 ${
                               isCompleted
                                 ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 ring-4 ring-emerald-100'
+                                : isSkipped
+                                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-4 ring-amber-100'
                                 : isRejected
                                 ? 'bg-rose-500 text-white shadow-md shadow-rose-500/25 ring-4 ring-rose-100'
                                 : isReturned
@@ -844,13 +884,15 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                             }`}
                           >
                             {isCompleted ? (
-                              <Check className="w-5 h-5 text-white" strokeWidth={3} />
+                              <Check className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" strokeWidth={3} />
+                            ) : isSkipped ? (
+                              <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" />
                             ) : isRejected ? (
-                              <X className="w-5 h-5 text-white" strokeWidth={3} />
+                              <X className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" strokeWidth={3} />
                             ) : isReturned ? (
-                              <RotateCcw className="w-5 h-5 text-white" strokeWidth={2.5} />
+                              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" strokeWidth={2.5} />
                             ) : (
-                              <span className="text-[14px] font-bold">{stepNumber}</span>
+                              <span className="text-xs sm:text-sm md:text-base font-bold">{stepNumber}</span>
                             )}
                           </div>
 
@@ -865,9 +907,11 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         {/* Step Details beneath circle */}
                         <div className="mt-2.5 flex flex-col items-center w-full">
                           <span
-                            className={`text-[12.5px] font-bold block text-center leading-tight break-words w-full ${
+                            className={`text-xs sm:text-[13px] md:text-sm font-bold block text-center leading-tight break-words w-full ${
                               isCurrent 
                                 ? 'text-blue-950 font-extrabold' 
+                                : isSkipped
+                                ? 'text-amber-950 font-bold'
                                 : isReturned 
                                 ? 'text-amber-950 font-extrabold' 
                                 : isRejected 
@@ -881,11 +925,16 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                             {step.approvers?.join(', ')}
                           </span>
                           <span
-                            className="text-[11px] text-slate-500 block text-center leading-snug break-words w-full mt-1"
+                            className="text-[10px] sm:text-[11px] md:text-xs text-slate-500 block text-center leading-snug break-words w-full mt-0.5 sm:mt-1"
                             title={roleText}
                           >
                             {roleText}
                           </span>
+                          {isSkipped && (
+                            <span className="text-[9px] sm:text-[10px] md:text-[11px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 sm:mt-1">
+                              Skipped
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -899,7 +948,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                               }`}
                             />
                             <ArrowRight
-                              className={`w-4 h-4 shrink-0 -ml-1 transition-colors ${
+                              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 shrink-0 -ml-1 transition-colors ${
                                 isCompleted
                                   ? 'text-emerald-500'
                                   : isCurrent
@@ -921,34 +970,42 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           {/* Approval Timeline */}
           {historyEntries.length > 0 && (
             <div>
-              <h3 className="text-[15px] font-semibold text-slate-900 mb-4">Approval History</h3>
+              <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-2.5 sm:mb-4">Approval History</h3>
               <div className="relative">
                 <span className="absolute left-[14px] top-7 bottom-7 w-px bg-slate-200" />
                 {historyEntries.map((entry, idx) => {
                   const action = entry.voteAction;
+                  const isEntrySkipped = action === 'skip' || action === 'skipped' || entry.skipped;
                   const statusLabel = action === 'approve' ? 'Approved'
                     : action === 'reject' ? 'Declined'
                     : action === 'return' ? 'Returned'
                     : action === 'edit' ? 'Resubmitted'
+                    : isEntrySkipped ? 'Skipped'
                     : action === 'pending' ? 'Pending' : 'Awaiting';
                   const statusColor = action === 'approve' ? 'text-emerald-600'
                     : action === 'reject' ? 'text-rose-600'
                     : action === 'pending' ? 'text-blue-600'
                     : action === 'return' ? 'text-amber-600'
+                    : isEntrySkipped ? 'text-amber-600'
                     : action === 'edit' ? 'text-blue-600' : 'text-slate-500';
                   const cardColor = action === 'return'
                     ? 'border-amber-300 bg-amber-50/60'
+                    : isEntrySkipped
+                    ? 'border-amber-300 bg-amber-50/50'
                     : 'border-slate-300 bg-slate-50/80';
                   const markerColor = action === 'approve' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                     : action === 'reject' ? 'border-rose-200 bg-rose-50 text-rose-700'
                     : action === 'return' ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : isEntrySkipped ? 'border-amber-300 bg-amber-100 text-amber-800'
                     : action === 'edit' ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : action === 'pending' ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : 'border-slate-200 bg-white text-slate-600';
                   const comment = String(entry.comment || '').replace('[System: ', '').replace(']', '');
-                  const commentText = !comment || comment === 'No comments filled'
-                    ? 'No comment provided.'
-                    : comment;
+                  const commentText = isEntrySkipped
+                    ? (comment || 'Skipped due to no response')
+                    : (!comment || comment === 'No comments filled'
+                      ? 'No comment provided.'
+                      : comment);
                   const date = formatDateTime(entry.date || entry.receivedDate).replace(' at ', ', ');
                   const canReplyToEntry = action === 'return' &&
                     entry.originalIdx === latestReturnHistoryIndex &&
@@ -957,26 +1014,26 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                   return (
                     <div key={`${entry.originalIdx}-${entry.name}-${idx}`} className="relative flex gap-3">
                       <div className="relative flex w-8 shrink-0 justify-center">
-                        <span className={`relative z-10 flex h-7 w-7 shrink-0 self-center items-center justify-center rounded-full border text-[11px] font-bold ${markerColor}`}>
+                        <span className={`relative z-10 flex h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 shrink-0 self-center items-center justify-center rounded-full border text-[10px] sm:text-[11px] md:text-xs font-bold ${markerColor}`}>
                           {historyEntries.length - idx}
                         </span>
                       </div>
-                      <div className={`mb-3 min-w-0 flex-1 rounded-lg border-[1.5px] px-3 py-2.5 ${cardColor}`}>
+                      <div className={`mb-2.5 sm:mb-3 min-w-0 flex-1 rounded-lg sm:rounded-xl border-[1.5px] p-2.5 sm:px-3 sm:py-2.5 md:p-3.5 ${cardColor}`}>
                         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-                          <div className="min-w-0 text-[13px]">
+                          <div className="min-w-0 text-[11px] sm:text-xs md:text-sm">
                             <span className="font-semibold text-slate-900">{entry.name}</span>
                             {entry.role && <span className="ml-1 text-slate-500">({entry.role})</span>}
                           </div>
-                          {date && <span className="shrink-0 text-[11px] text-slate-400">{date}</span>}
+                          {date && <span className="shrink-0 text-[10px] sm:text-[11px] md:text-xs text-slate-400">{date}</span>}
                         </div>
                         <div className="mt-2 rounded-md border border-slate-200 bg-white/80 px-2.5 py-1.5">
-                          <span className="text-[9px] font-semibold uppercase leading-none text-slate-400">Comment</span>
-                          <p className="mt-0.5 text-[12px] leading-snug text-slate-700 whitespace-pre-wrap">{commentText}</p>
+                          <span className="text-[9px] sm:text-[10px] md:text-[11px] font-semibold uppercase leading-none text-slate-400">Comment</span>
+                          <p className="mt-0.5 text-[11px] sm:text-xs md:text-[13px] leading-snug text-slate-700 whitespace-pre-wrap">{commentText}</p>
                         </div>
-                        <div className={`mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[10px] ${action === 'return' ? 'mb-2 border-b border-amber-200/70 pb-2' : ''}`}>
+                        <div className={`mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[9px] sm:text-[10px] md:text-[11px] ${action === 'return' ? 'mb-2 border-b border-amber-200/70 pb-2' : ''}`}>
                           <span className={`font-semibold uppercase ${statusColor}`}>{statusLabel}</span>
                           {Array.isArray(entry.addedFlow) && entry.addedFlow.length > 0 && (
-                            <span className="ml-auto text-right text-[11px] text-slate-500">
+                            <span className="ml-auto text-right text-[10px] sm:text-[11px] md:text-xs text-slate-500">
                               <span className="font-semibold text-emerald-700">Added Flow:</span>{' '}
                               {entry.addedFlow.map((flow, flowIndex) => {
                                 const department = flow.department || 'General';
@@ -999,12 +1056,12 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                         {entry.replies?.map((reply, replyIdx) => (
                           <div key={`${reply.name}-${replyIdx}`} className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
                             <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-                              <span className="text-[11px] font-semibold text-slate-800">
+                              <span className="text-[10px] sm:text-[11px] md:text-xs font-semibold text-slate-800">
                                 {reply.name}{reply.role && <span className="ml-1 font-normal text-slate-500">({reply.role})</span>}
                               </span>
-                              {reply.date && <span className="text-[10px] text-slate-400">{formatDateTime(reply.date).replace(' at ', ', ')}</span>}
+                              {reply.date && <span className="text-[9px] sm:text-[10px] md:text-[11px] text-slate-400">{formatDateTime(reply.date).replace(' at ', ', ')}</span>}
                             </div>
-                            <p className="mt-1 whitespace-pre-wrap text-[12px] text-slate-700"><span className="font-semibold text-slate-500">Reply Comment:</span> {reply.comment}</p>
+                            <p className="mt-1 whitespace-pre-wrap text-[11px] sm:text-xs md:text-[13px] text-slate-700"><span className="font-semibold text-slate-500">Reply Comment:</span> {reply.comment}</p>
                           </div>
                         ))}
                         {canReplyToEntry && (
@@ -1016,10 +1073,10 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                               rows={2}
                               placeholder="Write a reply to this return..."
                               aria-label="Reply to return message"
-                              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] sm:text-xs md:text-sm text-slate-800 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                             />
                             <div className="mt-1 flex items-center justify-between gap-3">
-                              <span className="text-[10px] text-slate-400">{returnReply.length}/1000</span>
+                              <span className="text-[9px] sm:text-[10px] md:text-xs text-slate-400">{returnReply.length}/1000</span>
                             </div>
                           </div>
                       )}
@@ -1034,8 +1091,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           {/* Legacy Remarks */}
           {(!request.commentsHistory || request.commentsHistory.length === 0) && request.remarks && typeof request.remarks === 'string' && (
             <div>
-              <h3 className="text-[16px] font-semibold text-slate-900 mb-3">Previous Remarks</h3>
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 text-[14px] text-slate-700 leading-relaxed whitespace-pre-wrap">
+              <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-2 sm:mb-3">Previous Remarks</h3>
+              <div className="bg-slate-50 rounded-xl p-3 sm:p-4 border border-slate-100 text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                 {request.remarks}
               </div>
             </div>
@@ -1046,9 +1103,9 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         
         {/* Actions Footer */}
         {canReplyToReturn ? (
-          <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between z-10">
-            {validationError && <p className="text-[12px] font-medium text-rose-600">{validationError}</p>}
-            <div className="ml-auto flex gap-3">
+          <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between z-10">
+            {validationError && <p className="text-[11px] sm:text-xs font-medium text-rose-600">{validationError}</p>}
+            <div className="ml-auto flex gap-2 sm:gap-3">
               {isRequester && (
                 <button
                   type="button"
@@ -1056,7 +1113,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     onClose();
                     onAction && onAction('edit', request);
                   }}
-                  className="px-4 py-2.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  className="px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   Edit Request
                 </button>
@@ -1064,7 +1121,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
+                className="px-3.5 py-2 sm:px-5 sm:py-2.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
               >
                 Close
               </button>
@@ -1072,9 +1129,9 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                 type="button"
                 onClick={handleReturnReply}
                 disabled={!returnReply.trim() || isSendingReply}
-                className="px-6 py-2.5 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 sm:px-6 sm:py-2.5 text-xs sm:text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-sm disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-1.5 sm:gap-2"
               >
-                <Send className="w-4 h-4" />
+                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 {isSendingReply ? 'Sending...' : 'Send Reply'}
               </button>
             </div>
@@ -1206,11 +1263,11 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               const involvedOptions = targetCandidates;
 
               return (
-                <div className="px-6 py-4 border-t border-slate-200 bg-amber-50/60 space-y-3">
-                  <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Return for Edits</span>
+                <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-200 bg-amber-50/60 space-y-2 sm:space-y-3">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Return for Edits</span>
 
                   <div>
-                    <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                    <label className="text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 block">
                       Return to <span className="text-red-500">*</span>
                     </label>
                     <CustomSelect
@@ -1227,8 +1284,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             })()}
 
             {isApproving && (
-              <div className="px-6 py-4 border-t border-slate-200 bg-blue-50/50">
-                <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-2 block">
+              <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-200 bg-blue-50/50">
+                <span className="text-[10px] sm:text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-1.5 sm:mb-2 block">
                   Workflow Approval Step
                 </span>
                 {request.approvalSequence && request.approvalSequence.length > 0 ? (
@@ -1237,8 +1294,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     if (!nextStep) {
                       return (
                         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2">
-                          <Check className="w-4 h-4 text-emerald-600" />
-                          <span className="text-[13px] font-semibold text-emerald-800">
+                          <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600" />
+                          <span className="text-xs sm:text-[13px] font-semibold text-emerald-800">
                             You are providing final approval. Confirming will mark this request as Approved.
                           </span>
                         </div>
@@ -1247,8 +1304,8 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     return (
                       <div className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between shadow-sm">
                         <div>
-                          <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Advances to Next Step</span>
-                          <span className="text-[13px] font-bold text-slate-800">
+                          <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Advances to Next Step</span>
+                          <span className="text-xs sm:text-[13px] font-bold text-slate-800">
                             Step {nextStep.step}: {nextStep.approvers?.join(', ')} ({nextStep.role === 'MD' ? 'Managing Director' : `${nextStep.department || ''} Head`})
                           </span>
                         </div>
@@ -1280,7 +1337,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                       return (
                         <div className="flex flex-col gap-3 p-1">
                           <div>
-                            <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                            <label className="text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 block">
                               Reporting Role <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
@@ -1300,7 +1357,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                           </div>
                           {selectedReportingRole && (
                             <div>
-                              <label className="text-[12px] font-semibold text-slate-700 mb-1 block">
+                              <label className="text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 block">
                                 Forward to <span className="text-red-500">*</span>
                               </label>
                               <div className="relative">
@@ -1328,13 +1385,13 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             )}
             
             {validationError && (
-              <div className="px-6 py-3 bg-rose-50 border-t border-rose-100 flex items-start gap-2">
-                <AlertCircle size={16} className="text-rose-500 mt-0.5 flex-shrink-0" />
-                <p className="text-[13px] font-medium text-rose-700">{validationError}</p>
+              <div className="px-4 sm:px-6 py-2.5 sm:py-3 bg-rose-50 border-t border-rose-100 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs sm:text-[13px] font-medium text-rose-700">{validationError}</p>
               </div>
             )}
             
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between z-10">
+            <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between z-10">
               <button 
                 onClick={() => {
                   if (isApproving) {
@@ -1351,16 +1408,16 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                     setValidationError('');
                   }
                 }}
-                className={`px-4 py-2.5 text-sm font-semibold bg-white border rounded-lg transition-colors focus:ring-2 ${(isApproving || isReturning) ? 'border-slate-200 text-slate-600 hover:bg-slate-50 focus:ring-slate-200' : 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300 focus:ring-amber-500/20'}`}
+                className={`px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm font-semibold bg-white border rounded-lg transition-colors focus:ring-2 ${(isApproving || isReturning) ? 'border-slate-200 text-slate-600 hover:bg-slate-50 focus:ring-slate-200' : 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300 focus:ring-amber-500/20'}`}
               >
                 {(isApproving || isReturning) ? 'Cancel' : 'Return for edits'}
               </button>
               
-              <div className="flex gap-3">
+              <div className="flex gap-2 sm:gap-3">
                 {!isApproving && !isReturning && (
                   <button 
                     onClick={() => handleActionClick('reject')}
-                    className="px-5 py-2.5 text-sm font-semibold text-rose-600 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 rounded-lg transition-colors focus:ring-2 focus:ring-rose-500/20"
+                    className="px-3.5 py-2 sm:px-5 sm:py-2.5 text-xs sm:text-sm font-semibold text-rose-600 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 rounded-lg transition-colors focus:ring-2 focus:ring-rose-500/20"
                   >
                     Decline
                   </button>
@@ -1403,18 +1460,34 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                       }
                     }
                   }}
-                  className={`px-6 py-2.5 text-sm font-semibold text-white rounded-lg shadow-sm transition-all focus:ring-2 flex items-center gap-2 ${isReturning ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 focus:ring-amber-500/30' : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 focus:ring-green-600/30'}`}
+                  className={`px-3.5 py-2 sm:px-6 sm:py-2.5 text-xs sm:text-sm font-semibold text-white rounded-lg shadow-sm transition-all focus:ring-2 flex items-center gap-1.5 sm:gap-2 ${isReturning ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 focus:ring-amber-500/30' : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 focus:ring-green-600/30'}`}
                 >
-                  <Check className="w-4 h-4" /> {isReturning ? 'Confirm Return' : isApproving ? 'Confirm Approval' : 'Approve Request'}
+                  <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> {isReturning ? 'Confirm Return' : isApproving ? 'Confirm Approval' : 'Approve Request'}
                 </button>
               </div>
             </div>
           </div>
         ) : (
-          <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end z-10">
+          <div className={`p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center ${isFinalDecision ? 'justify-between' : 'justify-end'} z-10`}>
+            {isFinalDecision && (
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 hover:text-blue-600 rounded-lg shadow-sm transition-all flex items-center gap-1.5 sm:gap-2 group disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Download full request card details as PDF"
+              >
+                {isDownloadingPdf ? (
+                  <span className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500 group-hover:text-blue-600 transition-colors" />
+                )}
+                <span>{isDownloadingPdf ? 'Generating PDF...' : 'Download PDF'}</span>
+              </button>
+            )}
             <button
               onClick={onClose}
-              className="px-5 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
+              className="px-3.5 sm:px-5 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg shadow-sm transition-colors"
             >
               Close
             </button>

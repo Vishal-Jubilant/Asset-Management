@@ -340,6 +340,7 @@ const NewRequest = () => {
                               {(() => {
                                   const details = getRequestNotificationDetails(req, user, getRequesterName(req.requestedBy));
                                   const label = details.type === 'new' ? 'New Request from' :
+                                    details.type === 'skipped' ? 'Skipped request from' :
                                     details.type === 'forwarded' ? 'Forwarded Request from' :
                                     details.type === 'returned' ? 'Returned Request from' :
                                     details.type === 'reply' ? 'Reply from' : 'Updated Request from';
