@@ -10,6 +10,7 @@ import RequestDetailsModal from '../components/RequestDetailsModal';
 import { AppContext } from '../context/AppContext';
 import { formatNotificationDateTime, getRequestNotificationDetails } from '../utils/requestNotification';
 import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
+import { stripHtmlToText } from '../utils/richText';
 
 const NewRequest = () => {
   const navigate = useNavigate();
@@ -274,7 +275,7 @@ const NewRequest = () => {
         escapeCSV(date),
         escapeCSV(r.category),
         escapeCSV(r.item),
-        escapeCSV(r.justification || ''),
+        escapeCSV(stripHtmlToText(r.justification || '')),
         escapeCSV(displayStatus)
       ].join(',');
     });

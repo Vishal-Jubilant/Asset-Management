@@ -12,6 +12,7 @@ import {
   getLocalTimeZone,
 } from "@internationalized/date";
 import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
+import { stripHtmlToText } from '../utils/richText';
 
 const MyRequests = () => {
   const { currentUser, requests, setRequests, users } = useContext(AppContext);
@@ -462,7 +463,7 @@ const MyRequests = () => {
         escapeCSV(date),
         escapeCSV(r.category),
         escapeCSV(r.item),
-        escapeCSV(r.justification || ''),
+        escapeCSV(stripHtmlToText(r.justification || '')),
         escapeCSV(displayStatus)
       ].join(',');
     });

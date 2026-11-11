@@ -10,6 +10,7 @@ import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
 import { processPasteToAttachment, isTableOrImageData } from '../utils/tableToImage';
+import { clipboardToRichHtml, formatPlainTextToSafeHtml, isHtmlContent, sanitizeRichHtml, stripHtmlToText } from '../utils/richText';
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 const isHead = (u) =>
@@ -103,6 +104,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [returnReply, setReturnReply] = useState('');
   const fileInputRef = useRef(null);
+  const descriptionEditorRef = useRef(null);
 
   const dropdownDirectionRef = useRef('up');
 
@@ -441,14 +443,23 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
   useEffect(() => {
     if (!isOpen) return;
     if (editRequest) {
+      const initialJust = editRequest.justification || '';
       setFormData({
         assetType: categories.some(c => c.value === editRequest.category) ? editRequest.category : 'Other',
         otherAssetType: categories.some(c => c.value === editRequest.category) ? '' : editRequest.category,
         description: editRequest.item || '',
-        justification: editRequest.justification || '',
+        justification: initialJust,
       });
+      if (descriptionEditorRef.current) {
+        descriptionEditorRef.current.innerHTML = initialJust
+          ? (isHtmlContent(initialJust) ? sanitizeRichHtml(initialJust) : formatPlainTextToSafeHtml(initialJust))
+          : '';
+      }
     } else {
       setFormData({ assetType: '', otherAssetType: '', description: '', justification: '' });
+      if (descriptionEditorRef.current) {
+        descriptionEditorRef.current.innerHTML = '';
+      }
     }
     setAttachedFiles([]);
     setFileError('');
@@ -465,6 +476,11 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     }
     return rows;
   }, [workflow]);
+
+  const plainJustificationLength = useMemo(
+    () => stripHtmlToText(formData.justification).length,
+    [formData.justification]
+  );
 
   if (!isOpen) return null;
 
@@ -534,6 +550,89 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
 
   const removeFile = (index) => setAttachedFiles(prev => prev.filter((_, i) => i !== index));
 
+  const syncDescriptionFromDom = () => {
+    const el = descriptionEditorRef.current;
+    if (!el) return;
+    const rawHtml = el.innerHTML;
+    const plainText = (el.textContent || '').replace(/\u00a0/g, ' ').trim();
+    const hasTable = el.querySelector('table') !== null;
+    if (!plainText && !hasTable) {
+      if (rawHtml !== '') {
+        el.innerHTML = '';
+      }
+      setFormData(prev => ({ ...prev, justification: '' }));
+      return;
+    }
+    setFormData(prev => ({ ...prev, justification: rawHtml }));
+  };
+
+  const insertHtmlAtCursor = (htmlFragment) => {
+    const el = descriptionEditorRef.current;
+    if (!el) return;
+    el.focus();
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && el.contains(selection.anchorNode)) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const frag = range.createContextualFragment(htmlFragment);
+      const lastNode = frag.lastChild;
+      range.insertNode(frag);
+      if (lastNode) {
+        const newRange = document.createRange();
+        newRange.setStartAfter(lastNode);
+        newRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+      }
+    } else {
+      el.insertAdjacentHTML('beforeend', htmlFragment);
+    }
+    syncDescriptionFromDom();
+  };
+
+  const handleDescriptionPaste = async (e) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // 1. Check for Excel / HTML / TSV table FIRST so Excel tables paste inline like Gmail
+    const { hasTable, html } = clipboardToRichHtml(clipboardData);
+    if (hasTable && html) {
+      e.preventDefault();
+      insertHtmlAtCursor(`${html}<div><br></div>`);
+      setPasteFeedback('Excel table pasted inline into description!');
+      setTimeout(() => setPasteFeedback(''), 3500);
+      return;
+    }
+
+    // 2. Screenshot-only clipboard (no table, no plain text): attach as image file
+    const hasImage = Array.from(clipboardData.items || []).some(item => item.type && item.type.startsWith('image/'));
+    const plainText = clipboardData.getData('text/plain') || '';
+    if (hasImage && !plainText.trim()) {
+      e.preventDefault();
+      setIsProcessingPaste(true);
+      try {
+        const result = await processPasteToAttachment(clipboardData);
+        if (result.success && result.file) {
+          setFileError('');
+          setAttachedFiles(prev => [...prev, result.file]);
+          setPasteFeedback('Image saved as attachment!');
+          setTimeout(() => setPasteFeedback(''), 4500);
+        }
+      } catch (err) {
+        console.error('Failed to handle paste:', err);
+      } finally {
+        setIsProcessingPaste(false);
+      }
+      return;
+    }
+
+    // 3. Normal text paste: keep consistent typography
+    if (plainText) {
+      e.preventDefault();
+      insertHtmlAtCursor(formatPlainTextToSafeHtml(plainText));
+    }
+  };
+
   const handlePasteToAttachment = async (e) => {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
@@ -601,6 +700,14 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       return;
     }
 
+    const plainDescText = stripHtmlToText(formData.justification).trim();
+    const hasTableInDesc = /<table\b/i.test(formData.justification || '');
+    if (!plainDescText && !hasTableInDesc && attachedFiles.length === 0) {
+      setValidationError('Please enter a description or attach a file.');
+      setIsSubmitting(false);
+      return;
+    }
+
     if (workflow.length === 0) {
       setValidationError('Please select at least one approver in the workflow.');
       setIsSubmitting(false);
@@ -653,9 +760,16 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     try {
       const base64Files = await Promise.all(filePromises);
 
+      const finalJustification = isHtmlContent(formData.justification)
+        ? sanitizeRichHtml(formData.justification)
+        : (formData.justification.trim().length > 0
+          ? formData.justification.charAt(0).toUpperCase() + formData.justification.slice(1)
+          : '');
+
       if (onAdd) {
         await onAdd({
           ...formData,
+          justification: finalJustification,
           approvalSequence: formattedSequence,
           selectedReportingTo: approverNames,
           selectedReportingRole: formattedSequence[0]?.role || 'Head',
@@ -778,21 +892,28 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                 <label className="text-[13px] font-medium text-slate-700">
                   Description {attachedFiles.length === 0 && <span className="text-red-500 ml-0.5">*</span>}
                 </label>
-                <span className={`text-[11px] font-medium tabular-nums ${formData.justification.length > 900 ? 'text-rose-500' : 'text-slate-400'}`}>
-                  {formData.justification.length}/1000
+                <span className="text-[11px] font-medium tabular-nums text-slate-400">
+                  {plainJustificationLength} chars
                 </span>
               </div>
-              <textarea
-                rows={3}
-                name="justification"
-                placeholder="Provide a brief business justification or paste Excel table (Ctrl+V)..."
-                value={formData.justification}
-                onChange={handleChange}
-                onPaste={handlePasteToAttachment}
-                required={attachedFiles.length === 0}
-                maxLength={1000}
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-800 text-[13px] resize-none shadow-sm transition-all placeholder:text-slate-400"
-              />
+              <div className="relative bg-white border border-slate-200 rounded-xl focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:border-brand-500 shadow-sm transition-all">
+                {!formData.justification && (
+                  <div className="pointer-events-none absolute top-2.5 left-3.5 right-3.5 text-[13px] text-slate-400 select-none">
+                    Provide a brief business justification or paste Excel table (Ctrl+V)...
+                  </div>
+                )}
+                <div
+                  ref={descriptionEditorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  role="textbox"
+                  aria-multiline="true"
+                  aria-label="Description"
+                  onInput={syncDescriptionFromDom}
+                  onPaste={handleDescriptionPaste}
+                  className="rich-description-content w-full px-3.5 py-2.5 text-slate-800 text-[13px] leading-relaxed min-h-[92px] max-h-[300px] overflow-auto focus:outline-none"
+                />
+              </div>
               {pasteFeedback && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-[12px] font-medium shadow-xs animate-in fade-in">
                   <CheckCircle2 size={15} className="text-emerald-600 flex-shrink-0" />

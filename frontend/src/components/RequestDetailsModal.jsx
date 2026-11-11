@@ -7,6 +7,7 @@ import {
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
+import { isHtmlContent, sanitizeRichHtml } from '../utils/richText';
 
 // Helper components for design system
 const Label = ({ children, className = '' }) => (
@@ -677,8 +678,19 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
           {/* Description */}
           <div>
             <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-1.5 sm:mb-2.5">Request Details</h3>
-            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 text-[13.5px] text-slate-700 leading-relaxed min-h-[60px]">
-              {request.justification || <span className="text-slate-400 italic">No description provided.</span>}
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 text-[13.5px] text-slate-700 leading-relaxed min-h-[60px] overflow-x-auto">
+              {request.justification ? (
+                isHtmlContent(request.justification) ? (
+                  <div
+                    className="rich-description-content space-y-1.5"
+                    dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(request.justification) }}
+                  />
+                ) : (
+                  <div className="whitespace-pre-wrap">{request.justification}</div>
+                )
+              ) : (
+                <span className="text-slate-400 italic">No description provided.</span>
+              )}
             </div>
           </div>
 

@@ -4,6 +4,7 @@ import StatusBadge from './StatusBadge';
 import Button from './Button';
 import { Eye, Check, X, CornerUpLeft, MessageSquare, FileText, ChevronLeft, ChevronRight, Trash2, Clock, CheckCircle, XCircle, RotateCcw, Edit2 } from 'lucide-react';
 import { getRequestDisplayStatus } from '../utils/getRequestDisplayStatus';
+import { stripHtmlToText } from '../utils/richText';
 
 const RequestTable = ({ requests, role, variant, onAction }) => {
   const { currentUser } = useContext(AppContext);
@@ -256,7 +257,7 @@ const RequestTable = ({ requests, role, variant, onAction }) => {
                     <td className="px-6 py-4 font-medium text-slate-900">{req.id}</td>
                     <td className="px-6 py-4 text-slate-600">{req.category}</td>
                     <td className="px-6 py-4 text-slate-700 font-medium max-w-[150px] truncate">{req.item}</td>
-                    <td className="px-6 py-4 text-slate-600 max-w-[200px] truncate">{req.justification || 'No description provided'}</td>
+                    <td className="px-6 py-4 text-slate-600 max-w-[200px] truncate">{stripHtmlToText(req.justification) || 'No description provided'}</td>
                     <td className="px-6 py-4">
                        <StatusBadge status={getDisplayStatus(req)} />
                     </td>

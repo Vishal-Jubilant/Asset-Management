@@ -1113,7 +1113,8 @@ async def create_asset_request(request: AssetRequestCreate, authorization: str =
                 
             justification = request.justification
             if justification and isinstance(justification, str) and len(justification) > 0:
-                justification = justification[0].upper() + justification[1:]
+                if not justification.lstrip().startswith("<"):
+                    justification = justification[0].upper() + justification[1:]
 
             if workflow and len(workflow) > 0:
                 workflow[0]["pendingSince"] = datetime.now().isoformat()
@@ -1693,7 +1694,8 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
         
     justification = request.justification
     if justification and isinstance(justification, str) and len(justification) > 0:
-        justification = justification[0].upper() + justification[1:]
+        if not justification.lstrip().startswith("<"):
+            justification = justification[0].upper() + justification[1:]
         
     r.item = item
     r.category = request.assetType

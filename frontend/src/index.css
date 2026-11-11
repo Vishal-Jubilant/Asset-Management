@@ -74,4 +74,24 @@
   --accent-soft: oklch(0.93 0.08 150.81);             /* light green for range */
   --accent-soft-foreground: oklch(0.42 0.15 150.81);  /* dark green text on range */
   --accent-soft-hover: oklch(0.88 0.10 150.81);       /* slightly darker light green */
+
+  .rich-description-content table {
+    border-collapse: collapse;
+    margin: 6px 0;
+    font-size: 12px;
+    line-height: 1.4;
+    background-color: #ffffff;
+  }
+  .rich-description-content td,
+  .rich-description-content th {
+    border: 1px solid #cbd5e1;
+    padding: 4px 8px;
+    vertical-align: middle;
+  }
+  .rich-description-content p {
+    margin: 0 0 4px 0;
+  }
+  .rich-description-content p:last-child {
+    margin-bottom: 0;
+  }
 }

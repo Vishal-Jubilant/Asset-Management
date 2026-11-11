@@ -1,5 +1,8 @@
 import io
 import math
+import re
+from html.parser import HTMLParser
+from xml.sax.saxutils import escape as xml_escape
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -144,6 +147,109 @@ class StarBadge(Flowable):
         canv.drawCentredString(cx, cy - (r_out * 0.44), 'VERIFIED & VALID')
 
         canv.restoreState()
+
+
+class RichDescriptionTextParser(HTMLParser):
+    """Extracts non-table text from sanitized HTML description for PDF generation."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._text_parts = []
+        self._bold_depth = 0
+        self._italic_depth = 0
+        self._table_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == 'table':
+            self._table_depth += 1
+            return
+        if self._table_depth > 0:
+            return
+
+        if tag == 'br':
+            self._text_parts.append('<br/>')
+        elif tag in ('b', 'strong'):
+            self._bold_depth += 1
+            self._text_parts.append('<b>')
+        elif tag in ('i', 'em'):
+            self._italic_depth += 1
+            self._text_parts.append('<i>')
+        elif tag == 'li':
+            if self._text_parts and not self._text_parts[-1].endswith('<br/>'):
+                self._text_parts.append('<br/>')
+            self._text_parts.append('• ')
+        elif tag in ('div', 'p', 'h1', 'h2', 'h3', 'h4'):
+            if self._text_parts and not self._text_parts[-1].endswith('<br/>'):
+                self._text_parts.append('<br/>')
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag == 'table':
+            if self._table_depth > 0:
+                self._table_depth -= 1
+            return
+        if self._table_depth > 0:
+            return
+
+        if tag in ('b', 'strong') and self._bold_depth > 0:
+            self._bold_depth -= 1
+            self._text_parts.append('</b>')
+        elif tag in ('i', 'em') and self._italic_depth > 0:
+            self._italic_depth -= 1
+            self._text_parts.append('</i>')
+        elif tag in ('div', 'p', 'li', 'h1', 'h2', 'h3', 'h4'):
+            if self._text_parts and not self._text_parts[-1].endswith('<br/>'):
+                self._text_parts.append('<br/>')
+
+    def handle_data(self, data):
+        if self._table_depth > 0:
+            return
+        cleaned = data.replace('\u00a0', ' ').replace('\r\n', '\n').replace('\r', '\n')
+        if cleaned:
+            self._text_parts.append(xml_escape(cleaned).replace('\n', '<br/>'))
+
+    def get_clean_html(self):
+        while self._bold_depth > 0:
+            self._text_parts.append('</b>')
+            self._bold_depth -= 1
+        while self._italic_depth > 0:
+            self._text_parts.append('</i>')
+            self._italic_depth -= 1
+        joined = ''.join(self._text_parts)
+        cleaned = re.sub(r'^(?:\s*<br/>\s*)+', '', joined)
+        cleaned = re.sub(r'(?:\s*<br/>\s*)+$', '', cleaned)
+        cleaned = re.sub(r'(?:<br/>\s*){3,}', '<br/><br/>', cleaned)
+        return cleaned.strip()
+
+
+def build_description_flowables(desc_content, body_text_style):
+    """Builds the Request Details PDF box, stripping inline Excel tables per download rules."""
+    text_box_style = TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+        ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
+        ('PADDING', (0,0), (-1,-1), 9),
+    ])
+
+    raw = (desc_content or '').strip()
+    if not raw:
+        t = Table([[Paragraph("No description provided.", body_text_style)]], colWidths=[523])
+        t.setStyle(text_box_style)
+        return [t]
+
+    if not re.search(r'<\s*(table|div|p|br|span|b|strong|i|em|u|ul|ol|li|tr|td|th)\b', raw, re.I):
+        safe_xml = xml_escape(raw).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>')
+        t = Table([[Paragraph(safe_xml, body_text_style)]], colWidths=[523])
+        t.setStyle(text_box_style)
+        return [t]
+
+    parser = RichDescriptionTextParser()
+    parser.feed(raw)
+    parser.close()
+
+    clean_text_html = parser.get_clean_html() or "No description provided."
+    t = Table([[Paragraph(clean_text_html, body_text_style)]], colWidths=[523])
+    t.setStyle(text_box_style)
+    return [t]
 
 
 def build_request_pdf(request_data: dict, requester_data: dict = None, users_map: dict = None) -> bytes:
@@ -306,13 +412,7 @@ def build_request_pdf(request_data: dict, requester_data: dict = None, users_map
     # 3. Request Details / Justification Box
     story.append(Paragraph("Request Details", section_head_style))
     desc_content = request_data.get('justification') or "No description provided."
-    desc_table = Table([[Paragraph(desc_content, body_text_style)]], colWidths=[523])
-    desc_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
-        ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
-        ('PADDING', (0,0), (-1,-1), 9),
-    ]))
-    story.append(desc_table)
+    story.extend(build_description_flowables(desc_content, body_text_style))
     story.append(Spacer(1, 14))
 
     # 4. Approval History & Comments Audit Trail
