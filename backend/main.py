@@ -1750,6 +1750,6 @@ async def startup_event():
                 db.close()
             except Exception as e:
                 print("Background overdue checker error:", e)
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)  # Check every 1 hour (3600 seconds)
 
     asyncio.create_task(background_overdue_checker())

@@ -2,7 +2,7 @@ import React, { useContext, useState, useEffect, useRef } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
   User, Hash, Eye, AlertCircle, Paperclip, Download, Shield,
-  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward
+  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward, FileText, ExternalLink
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
@@ -51,6 +51,52 @@ const formatReturnRecipient = (recipient, users) => {
   return `${recipientUser.name} - ${departmentRole}`;
 };
 
+const isPdfAttachment = (file) => {
+  if (!file) return false;
+  const name = (file.name || '').toLowerCase();
+  const type = (file.type || '').toLowerCase();
+  const data = (file.data || '').toLowerCase();
+  return name.endsWith('.pdf') || type.includes('pdf') || data.startsWith('data:application/pdf');
+};
+
+const getAttachmentBlobUrl = (file) => {
+  if (!file?.data) return null;
+  if (file.data.startsWith('blob:') || file.data.startsWith('http://') || file.data.startsWith('https://')) {
+    return file.data;
+  }
+  try {
+    const isPdf = isPdfAttachment(file);
+    const defaultMime = isPdf ? 'application/pdf' : 'image/png';
+    let mime = defaultMime;
+    let base64String = file.data;
+    if (file.data.includes(',')) {
+      const parts = file.data.split(',');
+      const match = parts[0].match(/:(.*?);/);
+      if (match && match[1]) {
+        mime = match[1];
+      }
+      base64String = parts[1];
+    }
+    base64String = base64String.replace(/\s/g, '');
+    const byteCharacters = atob(base64String);
+    const sliceSize = 1024;
+    const byteArrays = [];
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+    const blob = new Blob(byteArrays, { type: mime });
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error('Failed to create blob URL for attachment:', err);
+    return file.data;
+  }
+};
+
 const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const { users, currentUser, roles } = useContext(AppContext);
   const [newComment, setNewComment] = useState('');
@@ -65,8 +111,49 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isWorkflowMenuOpen, setIsWorkflowMenuOpen] = useState(false);
   const [selectedWorkflowApprovers, setSelectedWorkflowApprovers] = useState([]);
+  const [previewAttachment, setPreviewAttachment] = useState(null);
   const workflowScrollerRef = useRef(null);
   const workflowMenuRef = useRef(null);
+
+  const handleViewAttachment = (file) => {
+    const blobUrl = getAttachmentBlobUrl(file);
+    const isPdf = isPdfAttachment(file);
+    setPreviewAttachment({
+      file,
+      blobUrl,
+      isPdf
+    });
+  };
+
+  const handleOpenInNewTab = (file) => {
+    const blobUrl = getAttachmentBlobUrl(file);
+    if (blobUrl) {
+      window.open(blobUrl, '_blank');
+    }
+  };
+
+  const handleDownloadAttachment = (file) => {
+    try {
+      const isPdf = isPdfAttachment(file);
+      const blobUrl = getAttachmentBlobUrl(file);
+      const targetUrl = blobUrl || file.data;
+      const a = document.createElement('a');
+      a.href = targetUrl;
+      a.download = file.name || (isPdf ? 'document.pdf' : 'attachment');
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Failed to download attachment:', err);
+    }
+  };
+
+  const closePreviewAttachment = () => {
+    if (previewAttachment?.blobUrl && previewAttachment.blobUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(previewAttachment.blobUrl);
+    }
+    setPreviewAttachment(null);
+  };
   
   useEffect(() => {
     if (isOpen && request) {
@@ -82,6 +169,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       setIsDownloadingPdf(false);
       setIsWorkflowMenuOpen(false);
       setSelectedWorkflowApprovers([]);
+      setPreviewAttachment(null);
     }
   }, [isOpen, request]);
   
@@ -599,47 +687,50 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
             <div>
               <h3 className="text-xs sm:text-sm md:text-base font-semibold text-slate-900 mb-1.5 sm:mb-2.5">Attachments</h3>
               <div className="flex flex-wrap gap-3">
-                {request.attachments.map((file, idx) => (
-                  <div key={idx} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2 shadow-sm pr-4 max-w-sm w-full sm:w-auto">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                      <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+                {request.attachments.map((file, idx) => {
+                  const isPdf = isPdfAttachment(file);
+                  return (
+                    <div key={idx} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2 shadow-sm pr-3 max-w-sm w-full sm:w-auto">
+                      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        isPdf ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                      }`}>
+                        {isPdf ? (
+                          <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                        ) : (
+                          <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-[120px] overflow-hidden">
+                        <p className="text-xs sm:text-sm md:text-[14px] font-semibold text-slate-800 truncate" title={file.name}>
+                          {file.name}
+                        </p>
+                        <p className={`text-[9px] sm:text-[10px] md:text-[11px] font-medium uppercase tracking-wide ${
+                          isPdf ? 'text-rose-600' : 'text-slate-500'
+                        }`}>
+                          {isPdf ? 'PDF Document' : 'Image'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0 border-l border-slate-100 pl-2">
+                        <button 
+                          type="button"
+                          onClick={() => handleViewAttachment(file)}
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Preview attachment"
+                        >
+                          <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => handleDownloadAttachment(file)}
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Download"
+                        >
+                          <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-[120px] overflow-hidden">
-                      <p className="text-xs sm:text-sm md:text-[14px] font-semibold text-slate-800 truncate">{file.name}</p>
-                      <p className="text-[9px] sm:text-[10px] md:text-[11px] text-slate-500 uppercase tracking-wide">Image</p>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0 border-l border-slate-100 pl-2">
-                      <button 
-                        onClick={() => {
-                          const newWindow = window.open();
-                          if (newWindow) {
-                            newWindow.document.write(`
-                              <html>
-                                <head><title>Attachment: ${file.name}</title></head>
-                                <body style="margin:0; background-color:#1e293b; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden;">
-                                  <img src="${file.data}" style="max-width:90vw; max-height:90vh; object-fit:contain; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border-radius: 8px;" />
-                                </body>
-                              </html>
-                            `);
-                            newWindow.document.close();
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="View"
-                      >
-                        <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
-                      </button>
-                      <a 
-                        href={file.data} 
-                        download={file.name}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Download"
-                      >
-                        <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
-                      </a>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1495,6 +1586,90 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
         )}
 
       </div>
+
+      {/* Attachment Preview Modal */}
+      {previewAttachment && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-4 md:p-6"
+          onClick={closePreviewAttachment}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-5xl h-[90vh] overflow-hidden border border-slate-700/30"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 bg-slate-900 text-white border-b border-slate-800 flex-shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 overflow-hidden">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  previewAttachment.isPdf ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                }`}>
+                  {previewAttachment.isPdf ? (
+                    <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                  ) : (
+                    <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
+                  )}
+                </div>
+                <div className="overflow-hidden">
+                  <p className="text-xs sm:text-sm font-semibold text-white truncate max-w-xs sm:max-w-md md:max-w-lg">
+                    {previewAttachment.file.name}
+                  </p>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                    {previewAttachment.isPdf ? 'PDF Document' : 'Image Preview'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenInNewTab(previewAttachment.file)}
+                  className="px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Open in new tab"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Open in Tab</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadAttachment(previewAttachment.file)}
+                  className="px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Download file"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={closePreviewAttachment}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors ml-1"
+                  title="Close preview"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Viewer Body */}
+            <div className="flex-1 bg-slate-900 overflow-hidden relative flex items-center justify-center">
+              {previewAttachment.isPdf ? (
+                <iframe
+                  src={`${previewAttachment.blobUrl}#toolbar=1`}
+                  className="w-full h-full border-0 bg-slate-100"
+                  title={previewAttachment.file.name}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center p-4 overflow-auto">
+                  <img
+                    src={previewAttachment.blobUrl}
+                    alt={previewAttachment.file.name}
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-xl"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

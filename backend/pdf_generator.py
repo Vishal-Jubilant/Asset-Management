@@ -315,63 +315,7 @@ def build_request_pdf(request_data: dict, requester_data: dict = None, users_map
     story.append(desc_table)
     story.append(Spacer(1, 14))
 
-    # 4. Approval Status Workflow
-    workflow = request_data.get('approvalSequence') or []
-    if workflow:
-        story.append(Paragraph("Approval Status Workflow", section_head_style))
-        wf_rows = [[
-            Paragraph("<b>Step</b>", th_style),
-            Paragraph("<b>Role / Department</b>", th_style),
-            Paragraph("<b>Assigned Approver(s)</b>", th_style),
-            Paragraph("<b>Step Status</b>", th_style),
-        ]]
-        for idx, step in enumerate(workflow):
-            step_num = step.get('step', idx + 1)
-            role = step.get('role', 'Head')
-            dept = step.get('department', '')
-            role_text = f"{dept} {role}".strip() if dept else role
-            approvers = step.get('approvers', [])
-            approvers_str = ", ".join([
-                a.get('value', a.get('label', str(a))) if isinstance(a, dict) else str(a)
-                for a in approvers
-            ]) or "N/A"
-            step_status = (step.get('status') or 'pending').lower()
-
-            if step_status == 'approved':
-                st_color = '#15803d'
-                st_text = 'APPROVED'
-            elif step_status == 'skipped':
-                st_color = '#b45309'
-                st_text = 'SKIPPED'
-            elif step_status == 'rejected':
-                st_color = '#be123c'
-                st_text = 'DECLINED'
-            elif step_status == 'returned':
-                st_color = '#b45309'
-                st_text = 'RETURNED'
-            else:
-                st_color = '#2563eb'
-                st_text = 'PENDING'
-
-            wf_rows.append([
-                Paragraph(f"<b>Step {step_num}</b>", td_style),
-                Paragraph(role_text, td_style),
-                Paragraph(approvers_str, td_bold_style),
-                Paragraph(f"<font color='{st_color}'><b>{st_text}</b></font>", td_style)
-            ])
-
-        wf_table = Table(wf_rows, colWidths=[65, 175, 193, 90])
-        wf_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f5f9')),
-            ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#cbd5e1')),
-            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ]))
-        story.append(wf_table)
-        story.append(Spacer(1, 14))
-
-    # 5. Approval History & Comments Audit Trail
+    # 4. Approval History & Comments Audit Trail
     history = request_data.get('commentsHistory') or []
     if history:
         story.append(Paragraph("Approval History & Comments", section_head_style))

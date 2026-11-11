@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
   X, Plus, Package, Paperclip, User, Shield,
   ChevronDown, CheckCircle2, Lock, Building2,
-  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send, Download, Eye
+  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send, Download, Eye, FileText
 } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -634,7 +634,17 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
     const filePromises = attachedFiles.map(file =>
       new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve({ name: file.name, type: file.type, data: reader.result });
+        reader.onload = () => {
+          let mimeType = file.type;
+          if (!mimeType) {
+            if ((file.name || '').toLowerCase().endsWith('.pdf')) {
+              mimeType = 'application/pdf';
+            } else {
+              mimeType = 'application/octet-stream';
+            }
+          }
+          resolve({ name: file.name, type: mimeType, data: reader.result });
+        };
         reader.onerror = reject;
         reader.readAsDataURL(file);
       })
@@ -806,32 +816,40 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                   <Paperclip size={14} className="text-slate-400 group-hover:text-brand-600 transition-colors" />
                 </div>
                 <div>
-                  <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files or screenshots</p>
-                  <p className="text-[11px] text-slate-400">Up to 10MB per file • Or paste directly (Ctrl+V)</p>
+                  <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files, PDF or screenshots</p>
+                  <p className="text-[11px] text-slate-400">Up to 10MB per file • Images, PDFs or paste directly (Ctrl+V)</p>
                 </div>
               </div>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" multiple className="hidden" />
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*,.pdf,application/pdf" multiple className="hidden" />
               {fileError && <p className="text-xs text-rose-500 font-medium">{fileError}</p>}
               {attachedFiles.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-1">
                   {attachedFiles.map((file, idx) => {
-                    const isImg = file.type && file.type.startsWith('image/');
+                    const isPdf = file.type === 'application/pdf' || (file.name || '').toLowerCase().endsWith('.pdf');
+                    const isImg = file.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name || '');
                     return (
                       <div key={idx} className="flex items-center gap-2.5 text-sm text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                        {isImg ? (
-                          <span className="w-5 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">
+                        {isPdf ? (
+                          <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 flex items-center gap-1 flex-shrink-0 text-[10px] font-bold border border-rose-200">
+                            <FileText size={11} className="text-rose-600" />
+                            PDF
+                          </span>
+                        ) : isImg ? (
+                          <span className="w-6 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0 text-[10px] font-bold border border-emerald-200">
                             IMG
                           </span>
                         ) : (
                           <Paperclip size={13} className="text-slate-400 flex-shrink-0" />
                         )}
-                        <span className="truncate flex-1 text-[12px] font-medium text-slate-700">{file.name}</span>
-                        {isImg && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const url = URL.createObjectURL(file);
+                        <span className="truncate flex-1 text-[12px] font-medium text-slate-700" title={file.name}>{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const url = URL.createObjectURL(file);
+                            if (isPdf) {
+                              window.open(url, '_blank');
+                            } else {
                               const w = window.open();
                               if (w) {
                                 w.document.write(`
@@ -841,15 +859,17 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                                   </body></html>
                                 `);
                                 w.document.close();
+                              } else {
+                                window.open(url, '_blank');
                               }
-                            }}
-                            className="text-slate-400 hover:text-brand-600 px-1.5 py-0.5 rounded text-[11px] font-semibold hover:bg-brand-50 transition-colors inline-flex items-center gap-1"
-                            title="Preview image"
-                          >
-                            <Eye size={12} />
-                            View
-                          </button>
-                        )}
+                            }
+                          }}
+                          className="text-slate-400 hover:text-brand-600 px-1.5 py-0.5 rounded text-[11px] font-semibold hover:bg-brand-50 transition-colors inline-flex items-center gap-1"
+                          title={isPdf ? "Preview PDF in new tab" : "Preview image"}
+                        >
+                          <Eye size={12} />
+                          View
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {
