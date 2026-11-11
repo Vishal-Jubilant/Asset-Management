@@ -2,12 +2,13 @@ import React, { useContext, useState, useEffect, useRef } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
   User, Hash, Eye, AlertCircle, Paperclip, Download, Shield,
-  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward, FileText, ExternalLink
+  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward, FileText, ExternalLink, MessageSquare
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
 import { isHtmlContent, sanitizeRichHtml } from '../utils/richText';
+import { isPdfAttachment, getAttachmentBlobUrl } from '../utils/attachment';
 
 // Helper components for design system
 const Label = ({ children, className = '' }) => (
@@ -52,50 +53,267 @@ const formatReturnRecipient = (recipient, users) => {
   return `${recipientUser.name} - ${departmentRole}`;
 };
 
-const isPdfAttachment = (file) => {
-  if (!file) return false;
-  const name = (file.name || '').toLowerCase();
-  const type = (file.type || '').toLowerCase();
-  const data = (file.data || '').toLowerCase();
-  return name.endsWith('.pdf') || type.includes('pdf') || data.startsWith('data:application/pdf');
-};
+const buildWorkflowTimelineNodes = ({ request, requester, requesterDepartmentRole, users }) => {
+  const approvalSequence = request?.approvalSequence || [];
+  const history = request?.commentsHistory || [];
+  const overallStatus = (request?.status || '').trim();
+  const overallLower = overallStatus.toLowerCase();
+  const isOverallApproved = overallStatus === 'Approved';
+  const isOverallRejected = overallStatus === 'Rejected';
+  const isOverallReturned = overallStatus === 'Returned';
+  const currentStepNum = Number(request?.currentStep || 1);
 
-const getAttachmentBlobUrl = (file) => {
-  if (!file?.data) return null;
-  if (file.data.startsWith('blob:') || file.data.startsWith('http://') || file.data.startsWith('https://')) {
-    return file.data;
-  }
-  try {
-    const isPdf = isPdfAttachment(file);
-    const defaultMime = isPdf ? 'application/pdf' : 'image/png';
-    let mime = defaultMime;
-    let base64String = file.data;
-    if (file.data.includes(',')) {
-      const parts = file.data.split(',');
-      const match = parts[0].match(/:(.*?);/);
-      if (match && match[1]) {
-        mime = match[1];
-      }
-      base64String = parts[1];
+  const normalizeName = (val) => {
+    if (!val) return '';
+    const str = typeof val === 'object' ? (val.value || val.label || '') : String(val);
+    return str.split(' - ')[0].trim();
+  };
+
+  const formatStepRole = (step) => {
+    if (!step) return '';
+    return step.role === 'MD'
+      ? 'Managing Director'
+      : `${step.department ? `${step.department} ` : 'Department '}${step.role || 'Head'}`;
+  };
+
+  const resolveRoleForPerson = (personName, preferredStepIdx = -1, fallbackRoleText = '') => {
+    if (preferredStepIdx >= 0 && preferredStepIdx < approvalSequence.length) {
+      return formatStepRole(approvalSequence[preferredStepIdx]);
     }
-    base64String = base64String.replace(/\s/g, '');
-    const byteCharacters = atob(base64String);
-    const sliceSize = 1024;
-    const byteArrays = [];
-    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-      const slice = byteCharacters.slice(offset, offset + sliceSize);
-      const byteNumbers = new Array(slice.length);
-      for (let i = 0; i < slice.length; i++) {
-        byteNumbers[i] = slice.charCodeAt(i);
-      }
-      byteArrays.push(new Uint8Array(byteNumbers));
+    const lower = normalizeName(personName).toLowerCase();
+    if (lower && requester?.name?.toLowerCase().trim() === lower) {
+      return requesterDepartmentRole;
     }
-    const blob = new Blob(byteArrays, { type: mime });
-    return URL.createObjectURL(blob);
-  } catch (err) {
-    console.error('Failed to create blob URL for attachment:', err);
-    return file.data;
+    const u = users.find((usr) => usr.name?.toLowerCase().trim() === lower);
+    if (u) {
+      const roles = [u.role, u.departmentRole].filter(Boolean).map((r) => r.toLowerCase());
+      if (roles.includes('md')) return 'Managing Director';
+      if (roles.includes('head')) return `${u.department ? `${u.department} ` : 'Department '}Head`;
+      if (roles.includes('admin')) return `${u.department ? `${u.department} ` : ''}Admin`.trim();
+      const capRole = u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1).toLowerCase() : 'User';
+      return `${u.department ? `${u.department} ` : ''}${capRole}`.trim();
+    }
+    return fallbackRoleText || '';
+  };
+
+  const findStepIdx = (actorName, preferredStepNum, maxIdxExclusive = approvalSequence.length) => {
+    const lowerActor = normalizeName(actorName).toLowerCase();
+    const prefIdx = preferredStepNum ? Number(preferredStepNum) - 1 : -1;
+
+    if (prefIdx >= 0 && prefIdx < Math.min(approvalSequence.length, maxIdxExclusive)) {
+      const step = approvalSequence[prefIdx];
+      const names = (step.approvers || []).map((a) => normalizeName(a).toLowerCase());
+      if (!lowerActor || names.includes(lowerActor)) {
+        return prefIdx;
+      }
+    }
+
+    if (lowerActor) {
+      for (let i = 0; i < Math.min(approvalSequence.length, maxIdxExclusive); i++) {
+        const names = (approvalSequence[i].approvers || []).map((a) => normalizeName(a).toLowerCase());
+        if (names.includes(lowerActor)) return i;
+      }
+    }
+
+    if (prefIdx >= 0 && prefIdx < approvalSequence.length) {
+      return prefIdx;
+    }
+    return -1;
+  };
+
+  const nodes = [
+    {
+      key: 'creator',
+      status: 'creator',
+      name: requester?.name || 'Requester',
+      roleText: requesterDepartmentRole,
+      stepNumber: null,
+      badgeText: null,
+      isCurrent: false,
+      isRequesterNode: true,
+    }
+  ];
+
+  let nextExpectedIdx = 0;
+  let terminated = false;
+  let hasActiveReturnNode = false;
+
+  history.forEach((entry, hIdx) => {
+    const action = (entry.action || '').toLowerCase();
+    const isSkip = Boolean(entry.skipped || action === 'skip' || action === 'skipped');
+    if (!isSkip && !['approve', 'reject', 'return', 'edit'].includes(action)) {
+      return;
+    }
+
+    const entryStepIdx = action === 'edit' ? -1 : findStepIdx(entry.name, entry.step);
+    const entryStepNum = entryStepIdx >= 0 ? entryStepIdx + 1 : (entry.step ? Number(entry.step) : null);
+    const entryName = normalizeName(entry.name) || 'Approver';
+    const entryRoleText = action === 'edit'
+      ? requesterDepartmentRole
+      : resolveRoleForPerson(entryName, entryStepIdx, entry.role);
+
+    if (isSkip) {
+      nodes.push({
+        key: `hist-${hIdx}`,
+        status: 'skipped',
+        name: entryName,
+        roleText: entryRoleText,
+        stepNumber: entryStepNum,
+        badgeText: 'Skipped',
+        isCurrent: false,
+      });
+      if (entryStepIdx >= 0) nextExpectedIdx = entryStepIdx + 1;
+      return;
+    }
+
+    if (action === 'approve') {
+      nodes.push({
+        key: `hist-${hIdx}`,
+        status: 'approved',
+        name: entryName,
+        roleText: entryRoleText,
+        stepNumber: entryStepNum,
+        badgeText: 'Approved',
+        isCurrent: false,
+      });
+      if (entryStepIdx >= 0) nextExpectedIdx = entryStepIdx + 1;
+      return;
+    }
+
+    if (action === 'reject') {
+      nodes.push({
+        key: `hist-${hIdx}`,
+        status: 'rejected',
+        name: entryName,
+        roleText: entryRoleText,
+        stepNumber: entryStepNum,
+        badgeText: 'Rejected',
+        isCurrent: false,
+      });
+      terminated = true;
+      return;
+    }
+
+    if (action === 'edit') {
+      nodes.push({
+        key: `hist-${hIdx}`,
+        status: 'edited',
+        name: entryName,
+        roleText: entryRoleText,
+        stepNumber: null,
+        badgeText: 'Resubmitted',
+        isCurrent: false,
+      });
+      nextExpectedIdx = 0;
+      hasActiveReturnNode = false;
+      return;
+    }
+
+    if (action === 'return') {
+      nodes.push({
+        key: `hist-${hIdx}`,
+        status: 'returned',
+        name: entryName,
+        roleText: entryRoleText,
+        stepNumber: entryStepNum,
+        badgeText: 'Returned',
+        isCurrent: false,
+      });
+
+      const targetName = normalizeName(entry.sentToStr) || (requester?.name || 'Requester');
+      const priorStepIdx = findStepIdx(targetName, null, entryStepIdx >= 0 ? entryStepIdx : approvalSequence.length);
+      const isTargetRequester =
+        targetName.toLowerCase() === (requester?.name || '').toLowerCase().trim() &&
+        priorStepIdx === -1;
+      const targetStepIdx = isTargetRequester ? -1 : priorStepIdx;
+      const targetStepNum = targetStepIdx >= 0 ? targetStepIdx + 1 : null;
+      const targetRoleText = isTargetRequester
+        ? requesterDepartmentRole
+        : resolveRoleForPerson(targetName, targetStepIdx);
+
+      const replies = Array.isArray(entry.replies) ? entry.replies : [];
+      const hasSubsequentHistory = history.slice(hIdx + 1).some((later) => {
+        const la = (later.action || '').toLowerCase();
+        return later.skipped || ['approve', 'reject', 'return', 'skip', 'skipped', 'edit'].includes(la);
+      });
+
+      if (replies.length > 0) {
+        nodes.push({
+          key: `hist-${hIdx}-reply`,
+          status: 'replied',
+          name: targetName,
+          roleText: targetRoleText,
+          stepNumber: targetStepNum,
+          badgeText: 'Replied',
+          isCurrent: false,
+        });
+        if (entryStepIdx >= 0) {
+          nextExpectedIdx = entryStepIdx;
+        }
+      } else if (!hasSubsequentHistory && !isOverallApproved && !isOverallRejected) {
+        nodes.push({
+          key: `hist-${hIdx}-pending-target`,
+          status: 'current',
+          name: targetName,
+          roleText: targetRoleText,
+          stepNumber: targetStepNum,
+          badgeText: 'Pending Reply',
+          isCurrent: true,
+          isRequesterNode: isTargetRequester,
+        });
+        hasActiveReturnNode = true;
+        if (entryStepIdx >= 0) {
+          nextExpectedIdx = entryStepIdx;
+        }
+      } else if (targetStepIdx >= 0) {
+        nextExpectedIdx = targetStepIdx;
+      } else if (entryStepIdx >= 0) {
+        nextExpectedIdx = entryStepIdx;
+      }
+    }
+  });
+
+  if (!terminated) {
+    for (let sIdx = Math.max(0, nextExpectedIdx); sIdx < approvalSequence.length; sIdx++) {
+      const step = approvalSequence[sIdx];
+      const stepNumber = sIdx + 1;
+      const stepName = (step.approvers || []).map((a) => normalizeName(a)).join(', ');
+      const roleText = formatStepRole(step);
+
+      let status = 'waiting';
+      let isCurrent = false;
+      let badgeText = null;
+
+      if (isOverallApproved || step.status === 'approved') {
+        status = 'approved';
+        badgeText = 'Approved';
+      } else if (!hasActiveReturnNode && stepNumber === currentStepNum && overallLower.includes('pending')) {
+        status = 'current';
+        isCurrent = true;
+      } else if (isOverallRejected && stepNumber === currentStepNum) {
+        status = 'rejected';
+        badgeText = 'Rejected';
+      } else if (isOverallReturned && stepNumber === currentStepNum && !hasActiveReturnNode) {
+        status = 'returned';
+        badgeText = 'Returned';
+      } else if (step.status === 'skipped') {
+        status = 'skipped';
+        badgeText = 'Skipped';
+      }
+
+      nodes.push({
+        key: `seq-${sIdx}-${stepNumber}`,
+        status,
+        name: stepName,
+        roleText,
+        stepNumber,
+        badgeText,
+        isCurrent,
+      });
+    }
   }
+
+  return nodes;
 };
 
 const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
@@ -612,6 +830,12 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
       })
     );
   const isReturnToRequester = latestWorkflowAction?.action === 'return' && !returnsToEarlierApprover;
+  const workflowTimelineNodes = buildWorkflowTimelineNodes({
+    request,
+    requester,
+    requesterDepartmentRole,
+    users,
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-2 sm:p-4 md:p-6 animate-in fade-in duration-200">
@@ -870,123 +1094,94 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                 ref={workflowScrollerRef}
                 className="flex items-start justify-between overflow-x-auto py-2 px-1 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full"
               >
-                <React.Fragment key="requester">
-                  <div className="flex flex-col items-center text-center flex-1 min-w-[95px] sm:min-w-[115px] md:min-w-[130px] px-1">
-                    <div className="relative">
-                      <div className="w-9 h-9 sm:w-11 sm:h-11 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-full flex items-center justify-center bg-emerald-50 border-2 border-emerald-300 text-emerald-700 shadow-sm">
-                        <User className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
-                      </div>
-                      {request.status === 'Returned' && isReturnInProgress && isReturnToRequester && (
-                        <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3" title="Request returned to requester">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 ring-2 ring-white" />
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2.5 flex flex-col items-center w-full">
-                      <span className="text-xs sm:text-[13px] md:text-sm font-bold text-emerald-800 block text-center leading-tight break-words w-full">
-                        {requester?.name || 'Requester'}
-                      </span>
-                      <span className="text-[10px] sm:text-[11px] md:text-xs text-emerald-700 block text-center leading-snug break-words w-full mt-0.5 sm:mt-1">
-                        {requesterDepartmentRole}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex-1 flex items-center justify-center min-w-[28px] sm:min-w-[48px] pt-4 sm:pt-4.5 px-1">
-                    <div className="w-full flex items-center justify-center">
-                      <span className="h-[2px] w-full rounded-l-full bg-slate-200" />
-                      <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 shrink-0 -ml-1 text-slate-300" strokeWidth={2.5} />
-                    </div>
-                  </div>
-                </React.Fragment>
-                {request.approvalSequence.map((step, sIdx) => {
-                  const stepNumber = sIdx + 1;
-                  const currentStepNum = request.currentStep || 1;
-                  const isOverallApproved = request.status === 'Approved';
-                  const isOverallRejected = request.status === 'Rejected';
-                  const isOverallReturned = request.status === 'Returned';
+                {workflowTimelineNodes.map((node, nIdx) => {
+                  const isCreator = node.status === 'creator';
+                  const isCompleted = node.status === 'approved';
+                  const isSkipped = node.status === 'skipped';
+                  const isReturned = node.status === 'returned';
+                  const isReplied = node.status === 'replied';
+                  const isEdited = node.status === 'edited';
+                  const isRejected = node.status === 'rejected';
+                  const isCurrent = node.status === 'current' || node.isCurrent;
 
-                  const stepApproverNames = (step.approvers || []).map(a =>
-                    (typeof a === 'object' ? a.value || a.label : String(a)).toLowerCase().trim()
-                  );
+                  const circleClasses = isCreator
+                    ? 'bg-emerald-50 border-2 border-emerald-300 text-emerald-700 shadow-sm'
+                    : isCompleted
+                    ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 ring-4 ring-emerald-100'
+                    : isSkipped || isReturned
+                    ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-4 ring-amber-100'
+                    : isReplied
+                    ? 'bg-teal-600 text-white shadow-md shadow-teal-500/25 ring-4 ring-teal-100'
+                    : isEdited
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/25 ring-4 ring-indigo-100'
+                    : isRejected
+                    ? 'bg-rose-500 text-white shadow-md shadow-rose-500/25 ring-4 ring-rose-100'
+                    : isCurrent
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 ring-4 ring-blue-100 scale-105'
+                    : 'bg-white border-2 border-slate-300 text-slate-400 group-hover:border-slate-400';
 
-                  // Extract the latest action specifically associated with this step or its approvers
-                  const stepComments = currentWorkflowHistory.filter(c => {
-                    if (c.step && c.step === stepNumber) return true;
-                    const cName = (c.name || '').toLowerCase().trim();
-                    return stepApproverNames.includes(cName);
-                  });
-                  const latestStepComment = stepComments.length > 0 ? stepComments[stepComments.length - 1] : null;
+                  const nameClasses = isCreator
+                    ? 'text-emerald-800'
+                    : isCurrent
+                    ? 'text-blue-950 font-extrabold'
+                    : isSkipped
+                    ? 'text-amber-950 font-bold'
+                    : isReturned
+                    ? 'text-amber-950 font-extrabold'
+                    : isReplied
+                    ? 'text-teal-950 font-bold'
+                    : isEdited
+                    ? 'text-indigo-950 font-bold'
+                    : isRejected
+                    ? 'text-rose-950 font-extrabold'
+                    : isCompleted
+                    ? 'text-slate-800'
+                    : 'text-slate-700';
 
-                  // Keep a return visible on its originating step when routing back to an earlier step.
-                  const hasPriorApproval = step.status === 'approved' || latestStepComment?.action === 'approve';
-                  const isFutureStep = stepNumber > currentStepNum && !isOverallApproved &&
-                    !hasPriorApproval && latestStepComment?.action !== 'return';
-                  const isCurrent = !isFutureStep &&
-                    stepNumber === currentStepNum &&
-                    request.status?.includes('Pending');
-                  const isLatestReturnedStep = request.status === 'Returned' &&
-                    latestWorkflowAction?.action === 'return' &&
-                    Number(latestWorkflowAction.step) === stepNumber;
-                  const isReturnedToEarlierStep = request.status?.includes('Pending') &&
-                    latestWorkflowAction?.action === 'return' &&
-                    latestWorkflowAction.step != null &&
-                    Number(latestWorkflowAction.step) > currentStepNum;
+                  const badgeClasses = isCompleted
+                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                    : isSkipped || isReturned
+                    ? 'text-amber-700 bg-amber-50 border-amber-200'
+                    : isReplied
+                    ? 'text-teal-700 bg-teal-50 border-teal-200'
+                    : isEdited
+                    ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                    : isRejected
+                    ? 'text-rose-700 bg-rose-50 border-rose-200'
+                    : 'text-blue-700 bg-blue-50 border-blue-200';
 
-                  // Determine step status
-                  const isRejected = !isLatestReturnedStep && !isCurrent && !isFutureStep && (
-                    step.status === 'rejected' ||
-                    latestStepComment?.action === 'reject' ||
-                    (isOverallRejected && stepNumber === currentStepNum)
-                  );
+                  const arrowLineClass = isCompleted
+                    ? 'bg-emerald-400'
+                    : isSkipped || isReturned
+                    ? 'bg-amber-300'
+                    : isReplied
+                    ? 'bg-teal-300'
+                    : isEdited
+                    ? 'bg-indigo-300'
+                    : isCurrent
+                    ? 'bg-blue-300'
+                    : 'bg-slate-200';
 
-                  const isReturned = !isCurrent && !isFutureStep && !isRejected && (
-                    isLatestReturnedStep ||
-                    step.status === 'returned' ||
-                    latestStepComment?.action === 'return' ||
-                    (isOverallReturned && stepNumber === currentStepNum)
-                  );
-
-                  const isSkipped = !isCurrent && !isFutureStep && !isRejected && !isReturned && (
-                    step.status === 'skipped' ||
-                    latestStepComment?.action === 'skip' ||
-                    latestStepComment?.skipped
-                  );
-
-                  const isCompleted = !isCurrent && !isFutureStep && !isRejected && !isReturned && !isSkipped && (
-                    hasPriorApproval ||
-                    isOverallApproved ||
-                    (latestStepComment?.action === 'approve') ||
-                    (stepNumber < currentStepNum && !isOverallRejected && !isOverallReturned)
-                  );
-                  const roleText = (() => {
-                    return step.role === 'MD'
-                      ? 'Managing Director' 
-                      : `${step.department ? `${step.department} ` : 'Department '}${step.role || 'Head'}`;
-                  })();
+                  const arrowHeadClass = isCompleted
+                    ? 'text-emerald-500'
+                    : isSkipped || isReturned
+                    ? 'text-amber-400'
+                    : isReplied
+                    ? 'text-teal-500'
+                    : isEdited
+                    ? 'text-indigo-500'
+                    : isCurrent
+                    ? 'text-blue-500'
+                    : 'text-slate-300';
 
                   return (
-                    <React.Fragment key={sIdx}>
-                      {/* Step Item Column */}
-                      <div className="flex flex-col items-center text-center flex-1 min-w-[95px] sm:min-w-[115px] md:min-w-[130px] group px-1">
-                        {/* Circle Shape Step Indicator */}
+                    <React.Fragment key={node.key}>
+                      <div className="flex flex-col items-center text-center flex-1 min-w-[88px] sm:min-w-[105px] md:min-w-[115px] group px-1">
                         <div className="relative flex items-center justify-center">
-                          <div
-                            className={`w-9 h-9 sm:w-11 sm:h-11 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm md:text-base transition-all duration-200 ${
-                              isCompleted
-                                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 ring-4 ring-emerald-100'
-                                : isSkipped
-                                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-4 ring-amber-100'
-                                : isRejected
-                                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/25 ring-4 ring-rose-100'
-                                : isReturned
-                                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 ring-4 ring-amber-100'
-                                : isCurrent
-                                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 ring-4 ring-blue-100 scale-105'
-                                : 'bg-white border-2 border-slate-300 text-slate-400 group-hover:border-slate-400'
-                            }`}
-                          >
-                            {isCompleted ? (
+                          <div className={`w-9 h-9 sm:w-11 sm:h-11 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm md:text-base transition-all duration-200 ${circleClasses}`}>
+                            {isCreator ? (
+                              <User className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                            ) : isCompleted ? (
                               <Check className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" strokeWidth={3} />
                             ) : isSkipped ? (
                               <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" />
@@ -994,8 +1189,14 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                               <X className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" strokeWidth={3} />
                             ) : isReturned ? (
                               <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" strokeWidth={2.5} />
+                            ) : isReplied ? (
+                              <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" strokeWidth={2.5} />
+                            ) : isEdited ? (
+                              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-white" strokeWidth={2.5} />
+                            ) : node.stepNumber ? (
+                              <span className="text-xs sm:text-sm md:text-base font-bold">{node.stepNumber}</span>
                             ) : (
-                              <span className="text-xs sm:text-sm md:text-base font-bold">{stepNumber}</span>
+                              <User className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white" />
                             )}
                           </div>
 
@@ -1007,57 +1208,35 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                           )}
                         </div>
 
-                        {/* Step Details beneath circle */}
                         <div className="mt-2.5 flex flex-col items-center w-full">
                           <span
-                            className={`text-xs sm:text-[13px] md:text-sm font-bold block text-center leading-tight break-words w-full ${
-                              isCurrent 
-                                ? 'text-blue-950 font-extrabold' 
-                                : isSkipped
-                                ? 'text-amber-950 font-bold'
-                                : isReturned 
-                                ? 'text-amber-950 font-extrabold' 
-                                : isRejected 
-                                ? 'text-rose-950 font-extrabold' 
-                                : isCompleted 
-                                ? 'text-slate-800' 
-                                : 'text-slate-700'
-                            }`}
-                            title={step.approvers?.join(', ')}
+                            className={`text-xs sm:text-[13px] md:text-sm font-bold block text-center leading-tight break-words w-full ${nameClasses}`}
+                            title={node.name}
                           >
-                            {step.approvers?.join(', ')}
+                            {node.name}
                           </span>
                           <span
-                            className="text-[10px] sm:text-[11px] md:text-xs text-slate-500 block text-center leading-snug break-words w-full mt-0.5 sm:mt-1"
-                            title={roleText}
+                            className={`text-[10px] sm:text-[11px] md:text-xs block text-center leading-snug break-words w-full mt-0.5 sm:mt-1 ${
+                              isCreator ? 'text-emerald-700' : 'text-slate-500'
+                            }`}
+                            title={node.roleText}
                           >
-                            {roleText}
+                            {node.roleText}
                           </span>
-                          {isSkipped && (
-                            <span className="text-[9px] sm:text-[10px] md:text-[11px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-0.5 sm:mt-1">
-                              Skipped
+                          {node.badgeText && (
+                            <span className={`text-[9px] sm:text-[10px] md:text-[11px] font-semibold px-1.5 py-0.5 rounded border mt-0.5 sm:mt-1 ${badgeClasses}`}>
+                              {node.badgeText}
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Arrow Connector (-->) between steps */}
-                      {sIdx < request.approvalSequence.length - 1 && (
-                        <div className="flex-1 flex items-center justify-center min-w-[28px] sm:min-w-[48px] pt-4 sm:pt-4.5 px-1">
+                      {nIdx < workflowTimelineNodes.length - 1 && (
+                        <div className="flex-1 flex items-center justify-center min-w-[24px] sm:min-w-[36px] pt-4 sm:pt-4.5 px-1">
                           <div className="w-full flex items-center justify-center">
-                            <span
-                              className={`h-[2px] w-full rounded-l-full transition-colors ${
-                                isCompleted ? 'bg-emerald-400' : isCurrent ? 'bg-blue-300' : 'bg-slate-200'
-                              }`}
-                            />
+                            <span className={`h-[2px] w-full rounded-l-full transition-colors ${arrowLineClass}`} />
                             <ArrowRight
-                              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 shrink-0 -ml-1 transition-colors ${
-                                isCompleted
-                                  ? 'text-emerald-500'
-                                  : isCurrent
-                                  ? 'text-blue-500'
-                                  : 'text-slate-300'
-                              }`}
+                              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 shrink-0 -ml-1 transition-colors ${arrowHeadClass}`}
                               strokeWidth={2.5}
                             />
                           </div>

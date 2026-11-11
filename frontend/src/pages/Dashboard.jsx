@@ -113,14 +113,17 @@ const Dashboard = () => {
     if (isCurrentlyPendingWithMe) return r.status || '';
 
     if (r.requestedBy !== user?.id) {
-      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c =>
-        (c.name || '').toLowerCase().trim() === (user?.name || '').toLowerCase().trim() &&
-        ['approve', 'reject', 'return'].includes(c.action)
-      );
+      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c => {
+        const act = (c.action || '').toLowerCase();
+        return (c.name || '').toLowerCase().trim() === (user?.name || '').toLowerCase().trim() &&
+          (c.skipped || ['approve', 'reject', 'return', 'skip', 'skipped'].includes(act));
+      });
       if (myLastAction) {
-        if (myLastAction.action === 'approve') return 'Approved';
-        if (myLastAction.action === 'reject') return 'Rejected';
-        if (myLastAction.action === 'return') return 'Returned';
+        const act = (myLastAction.action || '').toLowerCase();
+        if (myLastAction.skipped || act === 'skip' || act === 'skipped') return 'Skipped';
+        if (act === 'approve') return 'Approved';
+        if (act === 'reject') return 'Rejected';
+        if (act === 'return') return 'Returned';
       }
     }
 
@@ -339,11 +342,12 @@ const Dashboard = () => {
     // Optionally exclude my own requests from "received"
     if (r.requestedBy === user?.id) return false;
     
-    // 1. Check if I took any action on this request in history
-    const hasMyAction = (r.commentsHistory || []).some(c =>
-      (c.name || '').toLowerCase().trim() === (user?.name || '').toLowerCase().trim() &&
-      ['approve', 'reject', 'return'].includes(c.action)
-    );
+    // 1. Check if I took any action or was skipped on this request
+    const hasMyAction = (r.commentsHistory || []).some(c => {
+      const act = (c.action || '').toLowerCase();
+      return (c.name || '').toLowerCase().trim() === (user?.name || '').toLowerCase().trim() &&
+        (c.skipped || ['approve', 'reject', 'return', 'skip', 'skipped'].includes(act));
+    });
     if (hasMyAction) return true;
 
     // 2. Check if I already handled / voted on this request

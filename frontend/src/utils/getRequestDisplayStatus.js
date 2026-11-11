@@ -63,21 +63,33 @@ export function getRequestDisplayStatus(r, currentUser) {
   // Currently awaiting my action → show the Pending status as-is
   if (isCurrentlyPendingWithMe) return r.status;
 
-  // ── Step 2: Did I already take an action on someone else's request? ────────
+  // ── Step 2: Did I already take an action (or get skipped) on someone else's request? ──
   if (r.requestedBy !== currentUser?.id) {
+    const currentName = (currentUser?.name || '').toLowerCase().trim();
     const myLastAction = [...(r.commentsHistory || [])]
       .reverse()
-      .find(
-        (c) =>
-          (c.name || '').toLowerCase().trim() ===
-            (currentUser?.name || '').toLowerCase().trim() &&
-          ['approve', 'reject', 'return'].includes(c.action)
-      );
+      .find((c) => {
+        const nameMatch = (c.name || '').toLowerCase().trim() === currentName;
+        const act = (c.action || '').toLowerCase();
+        return nameMatch && (c.skipped || ['approve', 'reject', 'return', 'skip', 'skipped'].includes(act));
+      });
     if (myLastAction) {
-      if (myLastAction.action === 'approve') return 'Approved';
-      if (myLastAction.action === 'reject') return 'Rejected';
-      if (myLastAction.action === 'return') return 'Returned';
+      const act = (myLastAction.action || '').toLowerCase();
+      if (myLastAction.skipped || act === 'skip' || act === 'skipped') return 'Skipped';
+      if (act === 'approve') return 'Approved';
+      if (act === 'reject') return 'Rejected';
+      if (act === 'return') return 'Returned';
     }
+
+    const wasSkippedInSequence = (r.approvalSequence || []).some(
+      (step) =>
+        (step.status || '').toLowerCase() === 'skipped' &&
+        (step.approvers || []).some((a) => {
+          const nameStr = typeof a === 'object' ? a.value || a.label : String(a);
+          return nameStr?.toLowerCase().trim() === currentName;
+        })
+    );
+    if (wasSkippedInSequence) return 'Skipped';
   }
 
   // ── Step 3: Fallback to raw status ────────────────────────────────────────

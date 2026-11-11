@@ -1705,7 +1705,9 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     r.approvalSequence = workflow
     r.currentStep = current_step
     r.status = initial_status
-    r.attachments = request.attachments or r.attachments
+    if request.attachments is not None:
+        r.attachments = request.attachments
+        flag_modified(r, "attachments")
     r.handledBy = []
     r.votes = {}
     r.approverSelections = {}

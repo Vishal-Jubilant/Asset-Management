@@ -11,6 +11,7 @@ import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
 import { processPasteToAttachment, isTableOrImageData } from '../utils/tableToImage';
 import { clipboardToRichHtml, formatPlainTextToSafeHtml, isHtmlContent, sanitizeRichHtml, stripHtmlToText } from '../utils/richText';
+import { isPdfAttachment, isImageAttachment, getAttachmentBlobUrl } from '../utils/attachment';
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 const isHead = (u) =>
@@ -455,13 +456,14 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
           ? (isHtmlContent(initialJust) ? sanitizeRichHtml(initialJust) : formatPlainTextToSafeHtml(initialJust))
           : '';
       }
+      setAttachedFiles(Array.isArray(editRequest.attachments) ? editRequest.attachments : []);
     } else {
       setFormData({ assetType: '', otherAssetType: '', description: '', justification: '' });
       if (descriptionEditorRef.current) {
         descriptionEditorRef.current.innerHTML = '';
       }
+      setAttachedFiles([]);
     }
-    setAttachedFiles([]);
     setFileError('');
     setValidationError('');
     setReturnReply('');
@@ -737,9 +739,16 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
 
     const approverNames = uniqueWorkflow.map(a => a.name);
 
-    // Convert files
-    const filePromises = attachedFiles.map(file =>
-      new Promise((resolve, reject) => {
+    // Convert newly attached File/Blob items while keeping existing saved { name, type, data } attachments
+    const filePromises = attachedFiles.map(file => {
+      if (!(file instanceof Blob) && file?.data) {
+        let mimeType = file.type;
+        if (!mimeType) {
+          mimeType = isPdfAttachment(file) ? 'application/pdf' : 'application/octet-stream';
+        }
+        return Promise.resolve({ name: file.name, type: mimeType, data: file.data });
+      }
+      return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
           let mimeType = file.type;
@@ -754,8 +763,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
         };
         reader.onerror = reject;
         reader.readAsDataURL(file);
-      })
-    );
+      });
+    });
 
     try {
       const base64Files = await Promise.all(filePromises);
@@ -946,8 +955,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
               {attachedFiles.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-1">
                   {attachedFiles.map((file, idx) => {
-                    const isPdf = file.type === 'application/pdf' || (file.name || '').toLowerCase().endsWith('.pdf');
-                    const isImg = file.type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name || '');
+                    const isPdf = isPdfAttachment(file);
+                    const isImg = isImageAttachment(file);
                     return (
                       <div key={idx} className="flex items-center gap-2.5 text-sm text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
                         {isPdf ? (
@@ -967,7 +976,8 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const url = URL.createObjectURL(file);
+                            const url = getAttachmentBlobUrl(file);
+                            if (!url) return;
                             if (isPdf) {
                               window.open(url, '_blank');
                             } else {
@@ -995,14 +1005,17 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const url = URL.createObjectURL(file);
+                            const url = getAttachmentBlobUrl(file);
+                            if (!url) return;
                             const a = document.createElement('a');
                             a.href = url;
                             a.download = file.name;
                             document.body.appendChild(a);
                             a.click();
                             document.body.removeChild(a);
-                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                            if (url.startsWith('blob:')) {
+                              setTimeout(() => URL.revokeObjectURL(url), 1000);
+                            }
                           }}
                           className="text-slate-400 hover:text-brand-600 p-1 hover:bg-brand-50 rounded transition-colors"
                           title="Download file"

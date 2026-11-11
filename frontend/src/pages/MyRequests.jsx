@@ -54,10 +54,28 @@ const MyRequests = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filterOptions = ['Approved', 'Pending', 'Returned', 'Rejected'];
+  const filterOptions = ['Approved', 'Pending', 'Returned', 'Skipped', 'Rejected'];
   const toggleFilter = (option) => {
     setStatusFilters(prev => 
       prev.includes(option) ? prev.filter(f => f !== option) : [...prev, option]
+    );
+  };
+
+  const isApproverSkippedOrActed = (request) => {
+    const currentUserName = (currentUser?.name || '').toLowerCase().trim();
+    const actedOrSkippedInHistory = (request.commentsHistory || []).some(comment => {
+      const act = (comment.action || '').toLowerCase();
+      return (comment.name || '').toLowerCase().trim() === currentUserName &&
+        (comment.skipped || ['approve', 'reject', 'return', 'skip', 'skipped'].includes(act));
+    });
+    if (actedOrSkippedInHistory) return true;
+
+    return (request.approvalSequence || []).some(step =>
+      (step.status || '').toLowerCase() === 'skipped' &&
+      (step.approvers || []).some(approver => {
+        const name = typeof approver === 'object' ? approver.value || approver.label : String(approver);
+        return name?.toLowerCase().trim() === currentUserName;
+      })
     );
   };
 
@@ -65,12 +83,8 @@ const MyRequests = () => {
     if (!request) return false;
 
     const currentUserName = (currentUser?.name || '').toLowerCase().trim();
-    const hasMyAction = (request.commentsHistory || []).some(comment =>
-      (comment.name || '').toLowerCase().trim() === currentUserName &&
-      ['approve', 'reject', 'return'].includes(comment.action)
-    );
     const hasMyVote = (request.handledBy || []).some(id => String(id) === String(currentUser?.id));
-    if (hasMyAction || hasMyVote) return true;
+    if (isApproverSkippedOrActed(request) || hasMyVote) return true;
 
     if (!request.status?.includes('Pending')) return false;
 
@@ -99,12 +113,8 @@ const MyRequests = () => {
     if (!r) return false;
     if (r.requestedBy === currentUser?.id) return r.status === 'Returned';
 
-    // Keep request in the list if current user took an action (approve, reject, return)
-    const hasMyAction = (r.commentsHistory || []).some(c =>
-      (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
-      ['approve', 'reject', 'return'].includes(c.action)
-    );
-    if (hasMyAction) return true;
+    // Keep request in the list if current user acted on it or was skipped at their step
+    if (isApproverSkippedOrActed(r)) return true;
 
     if (r.handledBy && r.handledBy.includes(currentUser?.id)) return true;
 
@@ -173,65 +183,7 @@ const MyRequests = () => {
       })
     : requestsForCurrentRole;
 
-  const getDisplayStatus = (r) => {
-    if (!r) return '';
-
-    // If I acted on this request and I am not the requester, show the exact action I clicked: Approved / Rejected / Returned
-    if (r.requestedBy !== currentUser?.id) {
-      const myLastAction = [...(r.commentsHistory || [])].reverse().find(c =>
-        (c.name || '').toLowerCase().trim() === (currentUser?.name || '').toLowerCase().trim() &&
-        ['approve', 'reject', 'return'].includes(c.action)
-      );
-      if (myLastAction) {
-        if (myLastAction.action === 'approve') return 'Approved';
-        if (myLastAction.action === 'reject') return 'Rejected';
-        if (myLastAction.action === 'return') return 'Returned';
-      }
-    }
-
-    const isMD = currentUser?.role?.toLowerCase() === 'md' || currentUser?.departmentRole?.toLowerCase() === 'md';
-    const roleName = isMD ? 'MD' : (currentUser?.role ? currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1).toLowerCase() : '');
-    const requester = users.find(u => u.id === r.requestedBy);
-    const isDeptHeadOfRequester = (currentUser?.role?.toLowerCase() === 'head' || currentUser?.departmentRole?.toLowerCase() === 'head') &&
-      currentUser?.department && requester?.department && currentUser.department.toLowerCase() === requester.department.toLowerCase();
-
-    let isCurrentlyPendingWithMe = false;
-    if (r.status?.includes('Pending')) {
-      if (r.approvalSequence && r.approvalSequence.length > 0) {
-        const curStepIdx = (r.currentStep || 1) - 1;
-        const curStep = r.approvalSequence[curStepIdx];
-        if (curStep && curStep.status !== 'approved' && curStep.status !== 'rejected') {
-          const isMDStep = curStep.role?.toLowerCase() === 'md' && isMD;
-          isCurrentlyPendingWithMe = isMDStep || (curStep.approvers || []).some(n => {
-            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-          });
-        }
-      } else if (r.status === `Pending with ${roleName}` || (r.status === 'Pending with MD' && isMD)) {
-        if (!r.forwardedTo || r.forwardedTo.length === 0) {
-          if (currentUser?.role?.toLowerCase() === 'head') {
-            isCurrentlyPendingWithMe = isDeptHeadOfRequester;
-          } else {
-            isCurrentlyPendingWithMe = true;
-          }
-        } else {
-          isCurrentlyPendingWithMe = (Array.isArray(r.forwardedTo) ? r.forwardedTo : [r.forwardedTo]).some(n => {
-            const nameStr = typeof n === 'object' ? n.value || n.label : String(n);
-            return nameStr?.toLowerCase()?.trim() === currentUser?.name?.toLowerCase()?.trim();
-          }) || (r.status === 'Pending with MD' && isMD);
-        }
-      }
-
-      // If I already voted, it's not pending for me anymore
-      if (r.handledBy && r.handledBy.includes(currentUser?.id)) {
-        isCurrentlyPendingWithMe = false;
-      }
-    }
-
-    if (isCurrentlyPendingWithMe) return r.status || '';
-
-    return r.status || '';
-  };
+  const getDisplayStatus = (r) => getRequestDisplayStatus(r, currentUser);
 
   const isForwardedToMe = (r) => {
     if (!r || !r.status?.includes('Pending')) return false;
@@ -456,7 +408,7 @@ const MyRequests = () => {
     const rows = filteredRequests.map(r => {
       const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
       
-      let displayStatus = r.status;
+      let displayStatus = getRequestDisplayStatus(r, currentUser) || r.status;
 
       return [
         escapeCSV(r.id),
