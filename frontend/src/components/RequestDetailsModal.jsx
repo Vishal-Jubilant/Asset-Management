@@ -2,13 +2,13 @@ import React, { useContext, useState, useEffect, useRef } from 'react';
 import { 
   X, Calendar, Check, CornerUpLeft, Clock, XCircle, RotateCcw, 
   User, Hash, Eye, AlertCircle, Paperclip, Download, Shield,
-  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward, FileText, ExternalLink, MessageSquare
+  ArrowRight, Send, ChevronDown, Lock, Plus, FastForward, FileText, FileSpreadsheet, ExternalLink, MessageSquare
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
 import { isHtmlContent, sanitizeRichHtml } from '../utils/richText';
-import { isPdfAttachment, getAttachmentBlobUrl } from '../utils/attachment';
+import { isPdfAttachment, isExcelAttachment, isWordAttachment, isImageAttachment, getAttachmentBlobUrl } from '../utils/attachment';
 
 // Helper components for design system
 const Label = ({ children, className = '' }) => (
@@ -335,6 +335,12 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const workflowMenuRef = useRef(null);
 
   const handleViewAttachment = (file) => {
+    const isExcel = isExcelAttachment(file);
+    const isWord = isWordAttachment(file);
+    if (isExcel || isWord) {
+      handleDownloadAttachment(file);
+      return;
+    }
     const blobUrl = getAttachmentBlobUrl(file);
     const isPdf = isPdfAttachment(file);
     setPreviewAttachment({
@@ -354,11 +360,17 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
   const handleDownloadAttachment = (file) => {
     try {
       const isPdf = isPdfAttachment(file);
+      const isExcel = isExcelAttachment(file);
+      const isWord = isWordAttachment(file);
       const blobUrl = getAttachmentBlobUrl(file);
       const targetUrl = blobUrl || file.data;
       const a = document.createElement('a');
       a.href = targetUrl;
-      a.download = file.name || (isPdf ? 'document.pdf' : 'attachment');
+      let defaultName = 'attachment';
+      if (isPdf) defaultName = 'document.pdf';
+      else if (isExcel) defaultName = 'spreadsheet.xlsx';
+      else if (isWord) defaultName = 'document.docx';
+      a.download = file.name || defaultName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -925,25 +937,48 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
               <div className="flex flex-wrap gap-3">
                 {request.attachments.map((file, idx) => {
                   const isPdf = isPdfAttachment(file);
+                  const isExcel = isExcelAttachment(file);
+                  const isWord = isWordAttachment(file);
+                  const isImg = isImageAttachment(file);
+
+                  let iconBg = 'bg-slate-100 text-slate-600';
+                  let typeLabel = 'File';
+                  let typeColor = 'text-slate-500';
+                  let IconComponent = Paperclip;
+
+                  if (isPdf) {
+                    iconBg = 'bg-rose-50 text-rose-600';
+                    typeLabel = 'PDF Document';
+                    typeColor = 'text-rose-600';
+                    IconComponent = FileText;
+                  } else if (isExcel) {
+                    iconBg = 'bg-emerald-50 text-emerald-700';
+                    typeLabel = 'Excel Spreadsheet';
+                    typeColor = 'text-emerald-700';
+                    IconComponent = FileSpreadsheet;
+                  } else if (isWord) {
+                    iconBg = 'bg-blue-50 text-blue-700';
+                    typeLabel = 'Word Document';
+                    typeColor = 'text-blue-700';
+                    IconComponent = FileText;
+                  } else if (isImg) {
+                    iconBg = 'bg-teal-50 text-teal-600';
+                    typeLabel = 'Image';
+                    typeColor = 'text-teal-600';
+                    IconComponent = Eye;
+                  }
+
                   return (
                     <div key={idx} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-2 shadow-sm pr-3 max-w-sm w-full sm:w-auto">
-                      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        isPdf ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
-                      }`}>
-                        {isPdf ? (
-                          <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
-                        ) : (
-                          <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
-                        )}
+                      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${iconBg}`}>
+                        <IconComponent className="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div className="flex-1 min-w-[120px] overflow-hidden">
                         <p className="text-xs sm:text-sm md:text-[14px] font-semibold text-slate-800 truncate" title={file.name}>
                           {file.name}
                         </p>
-                        <p className={`text-[9px] sm:text-[10px] md:text-[11px] font-medium uppercase tracking-wide ${
-                          isPdf ? 'text-rose-600' : 'text-slate-500'
-                        }`}>
-                          {isPdf ? 'PDF Document' : 'Image'}
+                        <p className={`text-[9px] sm:text-[10px] md:text-[11px] font-medium uppercase tracking-wide ${typeColor}`}>
+                          {typeLabel}
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0 border-l border-slate-100 pl-2">
@@ -951,7 +986,7 @@ const RequestDetailsModal = ({ isOpen, onClose, request, onAction }) => {
                           type="button"
                           onClick={() => handleViewAttachment(file)}
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Preview attachment"
+                          title={isExcel ? "Download & open in Excel" : (isWord ? "Download & open in Word" : "Preview attachment")}
                         >
                           <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5" />
                         </button>

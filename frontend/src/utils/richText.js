@@ -6,7 +6,7 @@
 const ALLOWED_TAGS = new Set([
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup', 'col',
   'div', 'p', 'br', 'span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike',
-  'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'font'
+  'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'font', 'img'
 ]);
 
 const STRIP_COMPLETELY_TAGS = new Set([
@@ -17,7 +17,7 @@ const STRIP_COMPLETELY_TAGS = new Set([
 
 export const isHtmlContent = (str) => {
   if (!str || typeof str !== 'string') return false;
-  return /<\s*(table|div|p|br|span|b|strong|i|em|u|ul|ol|li|h[1-4]|font|tr|td|th)\b[^>]*>/i.test(str);
+  return /<\s*(table|div|p|br|span|b|strong|i|em|u|ul|ol|li|h[1-4]|font|tr|td|th|img)\b[^>]*>/i.test(str);
 };
 
 export const escapeHtml = (str) => {
@@ -48,6 +48,9 @@ export const stripHtmlToText = (str) => {
       const parser = new DOMParser();
       const doc = parser.parseFromString(str, 'text/html');
       doc.querySelectorAll('script, style').forEach((el) => el.remove());
+      doc.querySelectorAll('img').forEach((img) => {
+        img.replaceWith(doc.createTextNode(' [Image] '));
+      });
 
       // Insert spacing around cells and block breaks so words don't mash together
       doc.querySelectorAll('td, th').forEach((cell) => {
@@ -71,6 +74,7 @@ export const stripHtmlToText = (str) => {
   return str
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<img[^>]*>/gi, ' [Image] ')
     .replace(/<\/(tr|p|div|li|h[1-4])>|<br\s*\/?>/gi, '\n')
     .replace(/<\/(td|th)>/gi, ' ')
     .replace(/<[^>]+>/g, '')
@@ -365,9 +369,24 @@ export const sanitizeRichHtml = (html) => {
     const effectiveTag = targetEl.tagName.toLowerCase();
     const colspan = targetEl.getAttribute('colspan');
     const rowspan = targetEl.getAttribute('rowspan');
+    const imgSrc = targetEl.getAttribute('src');
+    const imgAlt = targetEl.getAttribute('alt');
 
     // Strip ALL existing attributes to ensure zero event handlers / Excel noise
     Array.from(targetEl.attributes).forEach((attr) => targetEl.removeAttribute(attr.name));
+
+    if (effectiveTag === 'img') {
+      const trimmedSrc = (imgSrc || '').trim();
+      const isSafeSrc = /^(data:image\/|https?:\/\/|blob:)/i.test(trimmedSrc);
+      if (!isSafeSrc) {
+        targetEl.remove();
+        return;
+      }
+      targetEl.setAttribute('src', trimmedSrc);
+      if (imgAlt) targetEl.setAttribute('alt', imgAlt);
+      targetEl.setAttribute('style', 'max-width: 100%; height: auto; border-radius: 6px; margin: 6px 0; border: 1px solid #e2e8f0; display: block;');
+      return;
+    }
 
     if ((effectiveTag === 'td' || effectiveTag === 'th') && colspan && /^\d+$/.test(colspan) && Number(colspan) > 1) {
       targetEl.setAttribute('colspan', colspan);

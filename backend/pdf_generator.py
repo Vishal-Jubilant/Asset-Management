@@ -1,14 +1,17 @@
 import io
 import math
 import re
+import base64
 from html.parser import HTMLParser
 from xml.sax.saxutils import escape as xml_escape
 from datetime import datetime
+from bs4 import BeautifulSoup
+from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Flowable
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Flowable, Image as RLImage
 )
 from reportlab.pdfgen import canvas
 
@@ -149,11 +152,92 @@ class StarBadge(Flowable):
         canv.restoreState()
 
 
+def decode_image_data(data_uri_or_b64: str) -> bytes | None:
+    """Decodes a base64 string or data URI into raw image bytes."""
+    if not data_uri_or_b64 or not isinstance(data_uri_or_b64, str):
+        return None
+    raw = data_uri_or_b64.strip()
+    if raw.startswith('data:'):
+        if ',' in raw:
+            raw = raw.split(',', 1)[1]
+    raw = re.sub(r'\s+', '', raw)
+    if not raw:
+        return None
+    missing_padding = len(raw) % 4
+    if missing_padding:
+        raw += '=' * (4 - missing_padding)
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        return None
+
+
+def is_image_attachment(att: dict) -> bool:
+    """Strictly checks whether an attachment object represents a supported image format."""
+    if not isinstance(att, dict):
+        return False
+    name = str(att.get('name') or '').lower().strip()
+    att_type = str(att.get('type') or '').lower().strip()
+    data = str(att.get('data') or '').strip().lower()
+
+    # Explicit exclusions: PDF, Word, Excel, text, zip, etc.
+    non_img_exts = ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.zip', '.rar', '.7z', '.json')
+    if any(name.endswith(ext) for ext in non_img_exts):
+        return False
+    if 'pdf' in att_type or 'word' in att_type or 'excel' in att_type or 'spreadsheet' in att_type or 'text/' in att_type:
+        return False
+    if data.startswith('data:application/pdf') or data.startswith('data:application/msword') or data.startswith('data:application/vnd'):
+        return False
+
+    # Positive image check
+    img_exts = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tiff', '.tif')
+    if any(name.endswith(ext) for ext in img_exts):
+        return True
+    if att_type.startswith('image/'):
+        return True
+    if data.startswith('data:image/'):
+        return True
+
+    return False
+
+
+def make_reportlab_image(image_bytes: bytes, max_w: float = 507, max_h: float = 380) -> RLImage | None:
+    """Converts image bytes into a scaled ReportLab RLImage flowable fitting within max_w and max_h."""
+    if not image_bytes:
+        return None
+    try:
+        pil_img = PILImage.open(io.BytesIO(image_bytes))
+        orig_w, orig_h = pil_img.size
+        if orig_w <= 0 or orig_h <= 0:
+            return None
+
+        aspect = orig_h / float(orig_w)
+        target_w = min(float(orig_w), float(max_w))
+        target_h = target_w * aspect
+        if target_h > max_h:
+            target_h = float(max_h)
+            target_w = target_h / aspect
+
+        out_buf = io.BytesIO()
+        if pil_img.format == 'PNG' or pil_img.mode in ('RGBA', 'LA') or (pil_img.mode == 'P' and 'transparency' in pil_img.info):
+            pil_img.save(out_buf, format='PNG')
+        elif pil_img.format == 'JPEG' and pil_img.mode == 'RGB':
+            pil_img.save(out_buf, format='JPEG', quality=95)
+        else:
+            pil_img.convert('RGB').save(out_buf, format='JPEG', quality=95)
+
+        out_buf.seek(0)
+        return RLImage(out_buf, width=target_w, height=target_h)
+    except Exception:
+        return None
+
+
 class RichDescriptionTextParser(HTMLParser):
-    """Extracts non-table text from sanitized HTML description for PDF generation."""
+    """Extracts non-table text and inline images from sanitized HTML description for PDF generation."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self._text_parts = []
+        self._images = []
         self._bold_depth = 0
         self._italic_depth = 0
         self._table_depth = 0
@@ -164,6 +248,13 @@ class RichDescriptionTextParser(HTMLParser):
             self._table_depth += 1
             return
         if self._table_depth > 0:
+            return
+
+        if tag == 'img':
+            attrs_dict = dict(attrs)
+            src = (attrs_dict.get('src') or '').strip()
+            if src:
+                self._images.append(src)
             return
 
         if tag == 'br':
@@ -221,9 +312,243 @@ class RichDescriptionTextParser(HTMLParser):
         cleaned = re.sub(r'(?:<br/>\s*){3,}', '<br/><br/>', cleaned)
         return cleaned.strip()
 
+    def get_images(self):
+        return list(self._images)
+
+
+def parse_css_style(style_str: str) -> dict:
+    """Extracts CSS declarations from an inline style string."""
+    decls = {}
+    if not style_str:
+        return decls
+    for part in style_str.split(';'):
+        if ':' in part:
+            k, v = part.split(':', 1)
+            decls[k.strip().lower()] = v.strip()
+    return decls
+
+
+def parse_html_table_to_reportlab(table_soup, max_width: float = 523) -> Table | None:
+    """
+    Converts a BeautifulSoup <table> into a styled ReportLab Table flowable.
+    Handles colspans, rowspans, background-colors, borders, bold, alignment,
+    and automatically trims fully-blank boundary rows/columns from Excel pastes.
+    """
+    tr_tags = table_soup.find_all('tr')
+    if not tr_tags:
+        return None
+
+    row_count = len(tr_tags)
+    raw_rows = []
+    for tr in tr_tags:
+        cells = tr.find_all(['td', 'th'])
+        raw_rows.append(cells)
+
+    max_cols = 1
+    for cells in raw_rows:
+        row_cols = sum(int(c.get('colspan', 1)) for c in cells)
+        if row_cols > max_cols:
+            max_cols = row_cols
+
+    grid = [[None for _ in range(max_cols)] for _ in range(row_count)]
+    grid_spans = []
+
+    for r_idx, cells in enumerate(raw_rows):
+        c_idx = 0
+        for cell in cells:
+            while c_idx < max_cols and grid[r_idx][c_idx] is not None:
+                c_idx += 1
+            if c_idx >= max_cols:
+                break
+
+            colspan = 1
+            rowspan = 1
+            try:
+                colspan = max(1, int(cell.get('colspan', 1)))
+            except Exception:
+                pass
+            try:
+                rowspan = max(1, int(cell.get('rowspan', 1)))
+            except Exception:
+                pass
+
+            if c_idx + colspan > max_cols:
+                colspan = max_cols - c_idx
+
+            for dr in range(rowspan):
+                for dc in range(colspan):
+                    curr_r = r_idx + dr
+                    curr_c = c_idx + dc
+                    if curr_r < row_count and curr_c < max_cols:
+                        if dr == 0 and dc == 0:
+                            grid[curr_r][curr_c] = cell
+                        else:
+                            grid[curr_r][curr_c] = '__SPANNED__'
+
+            if colspan > 1 or rowspan > 1:
+                end_c = min(max_cols - 1, c_idx + colspan - 1)
+                end_r = min(row_count - 1, r_idx + rowspan - 1)
+                grid_spans.append(((c_idx, r_idx), (end_c, end_r)))
+
+            c_idx += colspan
+
+    col_has_content = [False] * max_cols
+    for c in range(max_cols):
+        for r in range(row_count):
+            item = grid[r][c]
+            if item and item != '__SPANNED__':
+                text = item.get_text(strip=True)
+                style = parse_css_style(item.get('style', ''))
+                bg = style.get('background-color') or item.get('bgcolor')
+                if text or bg:
+                    col_has_content[c] = True
+                    break
+            elif item == '__SPANNED__':
+                col_has_content[c] = True
+                break
+
+    row_has_content = [False] * row_count
+    for r in range(row_count):
+        for c in range(max_cols):
+            item = grid[r][c]
+            if item and item != '__SPANNED__':
+                text = item.get_text(strip=True)
+                style = parse_css_style(item.get('style', ''))
+                bg = style.get('background-color') or item.get('bgcolor')
+                if text or bg:
+                    row_has_content[r] = True
+                    break
+            elif item == '__SPANNED__':
+                row_has_content[r] = True
+                break
+
+    if not any(row_has_content) or not any(col_has_content):
+        return None
+
+    first_col = next(i for i, v in enumerate(col_has_content) if v)
+    last_col = len(col_has_content) - 1 - next(i for i, v in enumerate(reversed(col_has_content)) if v)
+    first_row = next(i for i, v in enumerate(row_has_content) if v)
+    last_row = len(row_has_content) - 1 - next(i for i, v in enumerate(reversed(row_has_content)) if v)
+
+    active_cols = list(range(first_col, last_col + 1))
+    active_rows = list(range(first_row, last_row + 1))
+
+    trimmed_col_count = len(active_cols)
+    trimmed_row_count = len(active_rows)
+
+    cell_style_base = ParagraphStyle(
+        'TableCellNormal',
+        fontName='Helvetica',
+        fontSize=8,
+        leading=10.5,
+        textColor=colors.HexColor('#0f172a')
+    )
+    cell_style_bold = ParagraphStyle(
+        'TableCellBold',
+        fontName='Helvetica-Bold',
+        fontSize=8,
+        leading=10.5,
+        textColor=colors.HexColor('#0f172a')
+    )
+
+    table_data = []
+    t_styles = [
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#cbd5e1')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]
+
+    for new_r, r in enumerate(active_rows):
+        row_data = []
+        for new_c, c in enumerate(active_cols):
+            cell_node = grid[r][c]
+            if cell_node is None or cell_node == '__SPANNED__':
+                row_data.append('')
+                continue
+
+            style = parse_css_style(cell_node.get('style', ''))
+            bg_color_str = style.get('background-color') or cell_node.get('bgcolor')
+            if bg_color_str:
+                clean_hex = bg_color_str.strip().lower()
+                try:
+                    if clean_hex.startswith('#'):
+                        t_styles.append(('BACKGROUND', (new_c, new_r), (new_c, new_r), colors.HexColor(clean_hex)))
+                    elif clean_hex in ('window', 'white'):
+                        t_styles.append(('BACKGROUND', (new_c, new_r), (new_c, new_r), colors.HexColor('#ffffff')))
+                except Exception:
+                    pass
+
+            text = cell_node.get_text().strip()
+            is_bold = (
+                cell_node.name == 'th' or
+                'bold' in style.get('font-weight', '') or
+                cell_node.find(['b', 'strong']) is not None
+            )
+
+            align = style.get('text-align', '').lower()
+            if align == 'center':
+                t_styles.append(('ALIGN', (new_c, new_r), (new_c, new_r), 'CENTER'))
+            elif align == 'right':
+                t_styles.append(('ALIGN', (new_c, new_r), (new_c, new_r), 'RIGHT'))
+            else:
+                t_styles.append(('ALIGN', (new_c, new_r), (new_c, new_r), 'LEFT'))
+
+            border_val = style.get('border', '').lower()
+            if 'solid' in border_val or '.5pt' in border_val or '1px' in border_val:
+                t_styles.append(('BOX', (new_c, new_r), (new_c, new_r), 0.5, colors.HexColor('#94a3b8')))
+
+            if text:
+                safe_t = xml_escape(text).replace('\n', '<br/>')
+                p = Paragraph(f"<b>{safe_t}</b>" if is_bold else safe_t, cell_style_bold if is_bold else cell_style_base)
+                row_data.append(p)
+            else:
+                row_data.append('')
+
+        table_data.append(row_data)
+
+    for (start_c, start_r), (end_c, end_r) in grid_spans:
+        if start_c <= last_col and end_c >= first_col and start_r <= last_row and end_r >= first_row:
+            n_start_c = max(0, start_c - first_col)
+            n_end_c = min(trimmed_col_count - 1, end_c - first_col)
+            n_start_r = max(0, start_r - first_row)
+            n_end_r = min(trimmed_row_count - 1, end_r - first_row)
+            if n_start_c != n_end_c or n_start_r != n_end_r:
+                t_styles.append(('SPAN', (n_start_c, n_start_r), (n_end_c, n_end_r)))
+
+    col_weights = [1.0] * trimmed_col_count
+    for c_idx in range(trimmed_col_count):
+        max_len = 0
+        for r_idx in range(trimmed_row_count):
+            item = table_data[r_idx][c_idx]
+            if isinstance(item, Paragraph):
+                max_len = max(max_len, len(item.text))
+        col_weights[c_idx] = max(1.0, float(max_len))
+
+    col_weights = [w ** 0.65 for w in col_weights]
+    total_w = sum(col_weights)
+    col_widths = [(w / total_w) * max_width for w in col_weights]
+
+    min_col_w = min(40, max_width / trimmed_col_count)
+    col_widths = [max(min_col_w, cw) for cw in col_widths]
+    curr_sum = sum(col_widths)
+    col_widths = [(cw / curr_sum) * max_width for cw in col_widths]
+
+    rl_table = Table(table_data, colWidths=col_widths)
+    rl_table.setStyle(TableStyle(t_styles))
+    return rl_table
+
 
 def build_description_flowables(desc_content, body_text_style):
-    """Builds the Request Details PDF box, stripping inline Excel tables per download rules."""
+    """
+    Builds the Request Details PDF flowables, preserving:
+    1. Text paragraphs and inline formatting
+    2. HTML/Excel Tables (with cell colors, borders, spans, and typography)
+    3. Inline pasted images in document order
+    """
     text_box_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
@@ -236,20 +561,92 @@ def build_description_flowables(desc_content, body_text_style):
         t.setStyle(text_box_style)
         return [t]
 
-    if not re.search(r'<\s*(table|div|p|br|span|b|strong|i|em|u|ul|ol|li|tr|td|th)\b', raw, re.I):
+    if not re.search(r'<\s*(table|div|p|br|span|b|strong|i|em|u|ul|ol|li|tr|td|th|img)\b', raw, re.I):
         safe_xml = xml_escape(raw).replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br/>')
         t = Table([[Paragraph(safe_xml, body_text_style)]], colWidths=[523])
         t.setStyle(text_box_style)
         return [t]
 
-    parser = RichDescriptionTextParser()
-    parser.feed(raw)
-    parser.close()
+    soup = BeautifulSoup(raw, 'html.parser')
+    tables = soup.find_all('table')
+    images = soup.find_all('img')
 
-    clean_text_html = parser.get_clean_html() or "No description provided."
-    t = Table([[Paragraph(clean_text_html, body_text_style)]], colWidths=[523])
-    t.setStyle(text_box_style)
-    return [t]
+    if not tables and not images:
+        parser = RichDescriptionTextParser()
+        try:
+            parser.feed(raw)
+            parser.close()
+        except Exception:
+            pass
+        clean_text_html = parser.get_clean_html() or "No description provided."
+        t = Table([[Paragraph(clean_text_html, body_text_style)]], colWidths=[523])
+        t.setStyle(text_box_style)
+        return [t]
+
+    marker_map = {}
+    counter = 0
+
+    for tbl in tables:
+        m = f"___TABLE_MARKER_{counter}___"
+        counter += 1
+        marker_map[m] = parse_html_table_to_reportlab(tbl, max_width=523)
+        tbl.replace_with(soup.new_string(m))
+
+    for img in images:
+        m = f"___IMG_MARKER_{counter}___"
+        counter += 1
+        src = img.get('src', '')
+        img_bytes = decode_image_data(src)
+        rl_img = make_reportlab_image(img_bytes, max_w=507, max_h=240) if img_bytes else None
+        marker_map[m] = rl_img
+        img.replace_with(soup.new_string(m))
+
+    parts = re.split(r'(___(?:TABLE|IMG)_MARKER_\d+___)', str(soup))
+    flowables = []
+
+    for p in parts:
+        p_clean = p.strip()
+        if not p_clean:
+            continue
+        if p_clean in marker_map:
+            item = marker_map[p_clean]
+            if p_clean.startswith('___TABLE_MARKER_') and item:
+                flowables.append(item)
+                flowables.append(Spacer(1, 8))
+            elif p_clean.startswith('___IMG_MARKER_') and item:
+                img_card = Table([[item]], colWidths=[523])
+                img_card.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+                    ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
+                    ('PADDING', (0,0), (-1,-1), 8),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ]))
+                flowables.append(img_card)
+                flowables.append(Spacer(1, 8))
+        else:
+            parser = RichDescriptionTextParser()
+            try:
+                parser.feed(p)
+                parser.close()
+            except Exception:
+                pass
+            clean = parser.get_clean_html()
+            if clean:
+                t = Table([[Paragraph(clean, body_text_style)]], colWidths=[523])
+                t.setStyle(text_box_style)
+                flowables.append(t)
+                flowables.append(Spacer(1, 6))
+
+    if flowables and isinstance(flowables[-1], Spacer):
+        flowables.pop()
+
+    if not flowables:
+        t = Table([[Paragraph("No description provided.", body_text_style)]], colWidths=[523])
+        t.setStyle(text_box_style)
+        flowables.append(t)
+
+    return flowables
 
 
 def build_request_pdf(request_data: dict, requester_data: dict = None, users_map: dict = None) -> bytes:
@@ -415,7 +812,39 @@ def build_request_pdf(request_data: dict, requester_data: dict = None, users_map
     story.extend(build_description_flowables(desc_content, body_text_style))
     story.append(Spacer(1, 14))
 
-    # 4. Approval History & Comments Audit Trail
+    # 4. Attached Images (Images only; strictly skip PDF, Word, Excel, etc.)
+    raw_attachments = request_data.get('attachments') or []
+    image_attachments = [a for a in raw_attachments if is_image_attachment(a)]
+    if image_attachments:
+        story.append(Paragraph("Attached Images", section_head_style))
+        for idx, att in enumerate(image_attachments, 1):
+            att_name = att.get('name') or f"Image {idx}"
+            att_data = att.get('data') or ''
+            img_bytes = decode_image_data(att_data)
+            if not img_bytes:
+                continue
+            rl_img = make_reportlab_image(img_bytes, max_w=507, max_h=380)
+            if not rl_img:
+                continue
+
+            card_content = [
+                [Paragraph(f"<b>Attachment {idx}: {xml_escape(att_name)}</b>", label_style)],
+                [Spacer(1, 4)],
+                [rl_img]
+            ]
+            att_card = Table(card_content, colWidths=[523])
+            att_card.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+                ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#e2e8f0')),
+                ('PADDING', (0,0), (-1,-1), 8),
+                ('ALIGN', (0,2), (0,2), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ]))
+            story.append(att_card)
+            story.append(Spacer(1, 10))
+        story.append(Spacer(1, 4))
+
+    # 5. Approval History & Comments Audit Trail
     history = request_data.get('commentsHistory') or []
     if history:
         story.append(Paragraph("Approval History & Comments", section_head_style))

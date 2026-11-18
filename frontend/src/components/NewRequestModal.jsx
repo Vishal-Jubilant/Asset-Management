@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import {
   X, Plus, Package, Paperclip, User, Shield,
   ChevronDown, CheckCircle2, Lock, Building2,
-  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send, Download, Eye, FileText
+  UserCheck, AlertTriangle, Trash2, Crown, PlusCircle, ArrowRight, Send, Download, Eye, FileText, FileSpreadsheet
 } from 'lucide-react';
 import Button from './Button';
 import CustomSelect from './CustomSelect';
@@ -11,7 +11,7 @@ import { AppContext } from '../context/AppContext';
 import api from '../utils/api';
 import { processPasteToAttachment, isTableOrImageData } from '../utils/tableToImage';
 import { clipboardToRichHtml, formatPlainTextToSafeHtml, isHtmlContent, sanitizeRichHtml, stripHtmlToText } from '../utils/richText';
-import { isPdfAttachment, isImageAttachment, getAttachmentBlobUrl } from '../utils/attachment';
+import { isPdfAttachment, isExcelAttachment, isWordAttachment, isImageAttachment, getAttachmentBlobUrl } from '../utils/attachment';
 
 /* ─── Helpers ─────────────────────────────────────────────── */
 const isHead = (u) =>
@@ -606,26 +606,31 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
       return;
     }
 
-    // 2. Screenshot-only clipboard (no table, no plain text): attach as image file
-    const hasImage = Array.from(clipboardData.items || []).some(item => item.type && item.type.startsWith('image/'));
-    const plainText = clipboardData.getData('text/plain') || '';
-    if (hasImage && !plainText.trim()) {
-      e.preventDefault();
-      setIsProcessingPaste(true);
-      try {
-        const result = await processPasteToAttachment(clipboardData);
-        if (result.success && result.file) {
-          setFileError('');
-          setAttachedFiles(prev => [...prev, result.file]);
-          setPasteFeedback('Image saved as attachment!');
-          setTimeout(() => setPasteFeedback(''), 4500);
-        }
-      } catch (err) {
-        console.error('Failed to handle paste:', err);
-      } finally {
-        setIsProcessingPaste(false);
+    // 2. Image / Screenshot paste directly into Description: paste inline just like Gmail!
+    const imageItem = Array.from(clipboardData.items || []).find(item => item.type && item.type.startsWith('image/'));
+    if (imageItem) {
+      const file = imageItem.getAsFile();
+      if (file) {
+        e.preventDefault();
+        setIsProcessingPaste(true);
+        const reader = new FileReader();
+        reader.onload = (uploadEvent) => {
+          const base64Data = uploadEvent.target?.result;
+          if (base64Data) {
+            insertHtmlAtCursor(
+              `<div style="margin: 8px 0;"><img src="${base64Data}" alt="Pasted Image" style="max-width: 100%; height: auto; border-radius: 6px; border: 1px solid #e2e8f0; display: block;" /></div><div><br></div>`
+            );
+            setPasteFeedback('Image pasted inline into description!');
+            setTimeout(() => setPasteFeedback(''), 3500);
+          }
+          setIsProcessingPaste(false);
+        };
+        reader.onerror = () => {
+          setIsProcessingPaste(false);
+        };
+        reader.readAsDataURL(file);
+        return;
       }
-      return;
     }
 
     // 3. Normal text paste: keep consistent typography
@@ -946,16 +951,25 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                   <Paperclip size={14} className="text-slate-400 group-hover:text-brand-600 transition-colors" />
                 </div>
                 <div>
-                  <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files, PDF or screenshots</p>
-                  <p className="text-[11px] text-slate-400">Up to 10MB per file • Images, PDFs or paste directly (Ctrl+V)</p>
+                  <p className="text-[13px] font-medium text-slate-700 group-hover:text-brand-700 transition-colors">Attach files, documents or screenshots</p>
+                  <p className="text-[11px] text-slate-400">Up to 10MB per file • Images, PDFs, Excel, Word or paste directly (Ctrl+V)</p>
                 </div>
               </div>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*,.pdf,application/pdf" multiple className="hidden" />
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*,.pdf,application/pdf,.xlsx,.xls,.docx,.doc,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/csv"
+                multiple
+                className="hidden"
+              />
               {fileError && <p className="text-xs text-rose-500 font-medium">{fileError}</p>}
               {attachedFiles.length > 0 && (
                 <div className="flex flex-col gap-1.5 mt-1">
                   {attachedFiles.map((file, idx) => {
                     const isPdf = isPdfAttachment(file);
+                    const isExcel = isExcelAttachment(file);
+                    const isWord = isWordAttachment(file);
                     const isImg = isImageAttachment(file);
                     return (
                       <div key={idx} className="flex items-center gap-2.5 text-sm text-slate-600 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
@@ -964,8 +978,18 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                             <FileText size={11} className="text-rose-600" />
                             PDF
                           </span>
+                        ) : isExcel ? (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 flex items-center gap-1 flex-shrink-0 text-[10px] font-bold border border-emerald-200">
+                            <FileSpreadsheet size={11} className="text-emerald-700" />
+                            XLS
+                          </span>
+                        ) : isWord ? (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1 flex-shrink-0 text-[10px] font-bold border border-blue-200">
+                            <FileText size={11} className="text-blue-700" />
+                            DOC
+                          </span>
                         ) : isImg ? (
-                          <span className="w-6 h-5 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0 text-[10px] font-bold border border-emerald-200">
+                          <span className="w-6 h-5 rounded bg-teal-50 text-teal-600 flex items-center justify-center flex-shrink-0 text-[10px] font-bold border border-teal-200">
                             IMG
                           </span>
                         ) : (
@@ -978,7 +1002,17 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                             e.stopPropagation();
                             const url = getAttachmentBlobUrl(file);
                             if (!url) return;
-                            if (isPdf) {
+                            if (isExcel || isWord) {
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = file.name;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              if (url.startsWith('blob:')) {
+                                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                              }
+                            } else if (isPdf) {
                               window.open(url, '_blank');
                             } else {
                               const w = window.open();
@@ -996,7 +1030,7 @@ const NewRequestModal = ({ isOpen, onClose, onAdd, editRequest = null }) => {
                             }
                           }}
                           className="text-slate-400 hover:text-brand-600 px-1.5 py-0.5 rounded text-[11px] font-semibold hover:bg-brand-50 transition-colors inline-flex items-center gap-1"
-                          title={isPdf ? "Preview PDF in new tab" : "Preview image"}
+                          title={isExcel ? "Download & open in Excel" : (isWord ? "Download & open in Word" : (isPdf ? "Preview PDF in new tab" : "Preview image"))}
                         >
                           <Eye size={12} />
                           View
