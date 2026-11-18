@@ -6,32 +6,102 @@
 *.njsproj
 *.sln
 *.sw?
+*.code-workspace
 
-# Backend (Python/FastAPI)
-backend/venv/
-backend/env/
-backend/__pycache__/
-backend/*.py[cod]
-backend/*$py.class
-backend/.env
-backend/.pytest_cache/
-backend/.coverage
-backend/htmlcov/
-backend/instance/
-backend/.webassets-cache
-backend/certs/key.pem
-
-# Python generic
-venv/
-env/
+# Python generic & Backend
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+backend/venv/
+backend/env/
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Certificates & SSL keys
+certs/
+backend/certs/
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+asset_management.db
+backend/asset_management.db
+backend/assetflow.db
+backend/database.db
+
+# Testing & Coverage
+.pytest_cache/
+backend/.pytest_cache/
+.coverage
+backend/.coverage
+htmlcov/
+backend/htmlcov/
+backend/instance/
+backend/.webassets-cache
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Generated outputs & PDFs
+*.pdf
+test_designs.pdf
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Node generic & Frontend builds
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+frontend/dist-ssr/
+
+# Python packaging
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -46,25 +116,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Frontend (Node/Vite)
-frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
-frontend/.env
-frontend/.env.local
-frontend/.env.development.local
-frontend/.env.test.local
-frontend/.env.production.local
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-frontend/pnpm-debug.log*
-
-# Node generic
-node_modules/
-dist/
-npm-debug.log*
 
 # OS generated files
 .DS_Store
