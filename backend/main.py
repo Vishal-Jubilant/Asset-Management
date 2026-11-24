@@ -759,6 +759,15 @@ def check_and_escalate_overdue_requests(db: Session):
                     last_event_dt = None
                     if r.commentsHistory:
                         for c in reversed(r.commentsHistory):
+                            if c.get("replies"):
+                                for rep in reversed(c["replies"]):
+                                    if rep.get("date"):
+                                        dt = parse_iso_datetime(rep["date"])
+                                        if dt:
+                                            last_event_dt = dt
+                                            break
+                            if last_event_dt:
+                                break
                             if c.get("date"):
                                 dt = parse_iso_datetime(c["date"])
                                 if dt:
@@ -1452,6 +1461,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
             ret_step["pendingSince"] = datetime.now().isoformat()
             for s_idx in range(ret_idx + 1, len(workflow)):
                 workflow[s_idx]["status"] = "waiting"
+                workflow[s_idx].pop("pendingSince", None)
 
             # Remove handledBy & votes from ret_step onwards so they can review and vote again
             affected_users = db.query(models.User).filter(
@@ -1467,6 +1477,7 @@ async def process_request_action(request_id: str, payload: ActionRequest, author
             updatedForwardedTo = [requester_user.name] if requester_user else None
             if workflow and 0 <= cur_idx < len(workflow):
                 workflow[cur_idx]["status"] = "returned"
+                workflow[cur_idx].pop("pendingSince", None)
 
     elif payload.action == 'approve':
         all_users = db.query(models.User).filter(models.User.status == 'Active').all()
@@ -1638,11 +1649,16 @@ async def reply_to_returned_request(request_id: str, payload: ReturnReplyRequest
 
     target_step = workflow[returner_step_index]
     current_step = int(target_step.get("step") or returner_step_index + 1)
+    now_iso = datetime.now().isoformat()
     for index, step in enumerate(workflow):
         if index < returner_step_index:
             step["status"] = step.get("status") or "approved"
+        elif index == returner_step_index:
+            step["status"] = "pending"
+            step["pendingSince"] = now_iso
         else:
-            step["status"] = "pending" if index == returner_step_index else "waiting"
+            step["status"] = "waiting"
+            step.pop("pendingSince", None)
 
     r.commentsHistory = comments
     r.approvalSequence = workflow
@@ -1685,8 +1701,14 @@ async def update_asset_request(request_id: str, request: AssetRequestCreate, aut
     target_step = workflow[target_step_index]
     current_step = int(target_step.get("step") or target_step_index + 1)
     initial_status = f"Pending with {target_step.get('role') or 'Head'}"
+    now_iso = datetime.now().isoformat()
     for index, step in enumerate(workflow):
-        step["status"] = "pending" if index == 0 else "waiting"
+        if index == 0:
+            step["status"] = "pending"
+            step["pendingSince"] = now_iso
+        else:
+            step["status"] = "waiting"
+            step.pop("pendingSince", None)
 
     item = request.description or (request.otherAssetType if request.assetType == "Other" else request.assetType)
     if item and isinstance(item, str) and len(item) > 0:
